@@ -1,15 +1,37 @@
-from rest_framework import viewsets
+from django.contrib.auth import get_user_model
 
-from apps.users.models import User
+from rest_framework import generics, permissions
+
+from apps.users.serializers import RegisterSerializer, UserSerializer
 
 
-class UserViewSet(viewsets.ReadOnlyModelViewSet):
+User = get_user_model()
+
+
+class RegisterView(generics.CreateAPIView):
     """
-    Placeholder read-only viewset for users.
+    Register a new user.
 
-    We will flesh this out with serializers and proper permissions later.
+    Request body:
+    {
+      "username": "yourname",
+      "email": "you@example.com",
+      "password": "yourpassword"
+    }
     """
 
-    queryset = User.objects.all()
-    serializer_class = None  # to be defined
+    permission_classes = [permissions.AllowAny]
+    serializer_class = RegisterSerializer
+
+
+class MeView(generics.RetrieveAPIView):
+    """
+    Return the currently authenticated user's profile.
+    """
+
+    serializer_class = UserSerializer
+
+    def get_object(self):
+        return self.request.user
+
 
