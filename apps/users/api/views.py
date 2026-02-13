@@ -2,7 +2,7 @@ from django.contrib.auth import get_user_model
 
 from rest_framework import generics, permissions, serializers
 from rest_framework.exceptions import AuthenticationFailed
-from rest_framework_simplejwt.serializers import TokenObtainPairSerializer
+from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import RegisterSerializer, UserSerializer
 
@@ -37,44 +37,40 @@ class MeView(generics.RetrieveAPIView):
         return self.request.user
 
 
-class EmailOrUsernameTokenObtainPairSerializer(TokenObtainPairSerializer):
+class EmailOrUsernameTokenObtainPairSerializer(serializers.Serializer):
     """
-    Custom SimpleJWT serializer that allows logging in with either email or username.
+    Email-only login using SimpleJWT.
 
-    Expected request body:
+    Expected payload:
     {
-      "identifier": "email-or-username",
+      "email": "you@example.com",
       "password": "yourpassword"
     }
     """
 
+    email = serializers.EmailField()
+    password = serializers.CharField(write_only=True)
+
     def validate(self, attrs):
-        request = self.context.get("request")
-        if request is None:
-            raise serializers.ValidationError("Request context is required.")
+        email = attrs.get("email")
+        password = attrs.get("password")
 
-        data = request.data
-        identifier = data.get("identifier") or data.get("email") or data.get("username")
-        password = data.get("password")
+        if not email or not password:
+            raise serializers.ValidationError("Both email and password are required.")
 
-        if not identifier or not password:
-            raise serializers.ValidationError("Both identifier and password are required.")
-
-        # Try to find the user by email first (case-insensitive), then by username.
-        user = None
+        # Look up user strictly by email (case-insensitive)
         try:
-            user = User.objects.get(email__iexact=identifier)
+            user = User.objects.get(email__iexact=email)
         except User.DoesNotExist:
-            try:
-                user = User.objects.get(username__iexact=identifier)
-            except User.DoesNotExist:
-                user = None
+            user = None
 
         if user is None or not user.check_password(password) or not user.is_active:
             # Do not leak which part was wrong
-            raise AuthenticationFailed("No active account found with the given credentials", code="authorization")
+            raise AuthenticationFailed(
+                "No active account found with the given credentials", code="authorization"
+            )
 
-        refresh = self.get_token(user)
+        refresh = RefreshToken.for_user(user)
 
         return {
             "refresh": str(refresh),
