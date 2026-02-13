@@ -10,6 +10,7 @@ class User(TimeStampedModel, AbstractUser):
 
     - `username` is used as the user's full name (no special validators).
     - `email` and `phone_number` are unique identifiers.
+    - `avatar` optionally stores a profile photo.
     """
 
     # Use a plain CharField for full name, not the default username validators,
@@ -29,6 +30,13 @@ class User(TimeStampedModel, AbstractUser):
         null=True,
         blank=True,
         help_text="User phone number in international format, digits only.",
+    )
+
+    avatar = models.ImageField(
+        upload_to="avatars/",
+        null=True,
+        blank=True,
+        help_text="Profile photo for the user.",
     )
 
     USERNAME_FIELD = "email"

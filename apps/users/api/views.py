@@ -1,7 +1,9 @@
 from django.contrib.auth import get_user_model
 
-from rest_framework import generics, permissions, serializers
+from rest_framework import generics, permissions, serializers, status
 from rest_framework.exceptions import AuthenticationFailed
+from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
 from apps.users.serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
@@ -49,6 +51,53 @@ class MeView(generics.RetrieveUpdateAPIView):
         # Always treat updates as partial so only provided fields are required.
         kwargs["partial"] = True
         return super().update(request, *args, **kwargs)
+
+
+class AvatarUploadView(generics.GenericAPIView):
+    """
+    Upload or replace the authenticated user's profile photo.
+
+    Endpoint:
+      POST /api/v1/auth/me/avatar/
+
+    Request (multipart/form-data):
+      avatar: <image file>
+
+    Response: updated user payload (same as /api/v1/auth/me/)
+    """
+
+    permission_classes = [permissions.IsAuthenticated]
+    parser_classes = [MultiPartParser, FormParser]
+    serializer_class = UserSerializer
+
+    def post(self, request, *args, **kwargs):
+        user = request.user
+        avatar_file = request.FILES.get("avatar")
+
+        if not avatar_file:
+            return Response(
+                {"detail": "No avatar file provided."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        user.avatar = avatar_file
+        user.save(update_fields=["avatar"])
+
+        serializer = self.get_serializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def delete(self, request, *args, **kwargs):
+        """
+        Remove the authenticated user's profile photo.
+        """
+
+        user = request.user
+        if user.avatar:
+            # This removes the file from storage and clears the field.
+            user.avatar.delete(save=True)
+
+        serializer = self.get_serializer(user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
 
 
 class EmailOrUsernameTokenObtainPairSerializer(serializers.Serializer):

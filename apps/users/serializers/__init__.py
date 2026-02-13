@@ -9,10 +9,27 @@ User = get_user_model()
 class UserSerializer(serializers.ModelSerializer):
     """Public representation of a user."""
 
+    avatar = serializers.SerializerMethodField()
+
     class Meta:
         model = User
-        fields = ["id", "username", "email", "phone_number", "date_joined"]
-        read_only_fields = ["id", "date_joined"]
+        fields = ["id", "username", "email", "phone_number", "avatar", "date_joined"]
+        read_only_fields = ["id", "date_joined", "avatar"]
+
+    def get_avatar(self, obj) -> str | None:
+        """
+        Return an absolute URL for the user's avatar if available.
+        """
+
+        if not getattr(obj, "avatar", None):
+            return None
+
+        request = self.context.get("request")
+        if request is None:
+            # Fallback to relative URL
+            return obj.avatar.url
+
+        return request.build_absolute_uri(obj.avatar.url)
 
 
 class RegisterSerializer(serializers.ModelSerializer):
