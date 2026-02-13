@@ -31,6 +31,13 @@ class RegisterSerializer(serializers.ModelSerializer):
         fields = ["id", "username", "email", "phone_number", "password"]
         read_only_fields = ["id"]
 
+    def validate_username(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name cannot be empty.")
+        # allow duplicate names, so no uniqueness check here
+        return value
+
     def validate_phone_number(self, value: str) -> str:
         digits_only = "".join(ch for ch in value if ch.isdigit())
         if len(digits_only) < 8 or len(digits_only) > 15:
@@ -49,6 +56,51 @@ class RegisterSerializer(serializers.ModelSerializer):
             password=password,
         )
         return user
+
+
+class UserUpdateSerializer(serializers.ModelSerializer):
+    """
+    Used for PATCH/PUT on the current user.
+
+    All fields are optional; only provided fields are validated and updated.
+    """
+
+    class Meta:
+        model = User
+        fields = ["username", "email", "phone_number"]
+        extra_kwargs = {
+            "username": {"required": False},
+            "email": {"required": False},
+            "phone_number": {"required": False},
+        }
+
+    def validate_username(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Name cannot be empty.")
+        return value
+
+    def validate_email(self, value: str) -> str:
+        # enforce uniqueness excluding current user
+        user_id = self.instance.id if self.instance else None
+        qs = User.objects.filter(email__iexact=value)
+        if user_id is not None:
+            qs = qs.exclude(id=user_id)
+        if qs.exists():
+            raise serializers.ValidationError("Email is already in use.")
+        return value
+
+    def validate_phone_number(self, value: str) -> str:
+        digits_only = "".join(ch for ch in value if ch.isdigit())
+        if len(digits_only) < 8 or len(digits_only) > 15:
+            raise serializers.ValidationError("Phone number must be between 8 and 15 digits.")
+        user_id = self.instance.id if self.instance else None
+        qs = User.objects.filter(phone_number=digits_only)
+        if user_id is not None:
+            qs = qs.exclude(id=user_id)
+        if qs.exists():
+            raise serializers.ValidationError("Phone number is already in use.")
+        return digits_only
 
 
 

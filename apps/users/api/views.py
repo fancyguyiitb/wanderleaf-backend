@@ -4,7 +4,7 @@ from rest_framework import generics, permissions, serializers
 from rest_framework.exceptions import AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.users.serializers import RegisterSerializer, UserSerializer
+from apps.users.serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
 
 
 User = get_user_model()
@@ -26,15 +26,29 @@ class RegisterView(generics.CreateAPIView):
     serializer_class = RegisterSerializer
 
 
-class MeView(generics.RetrieveAPIView):
+class MeView(generics.RetrieveUpdateAPIView):
     """
-    Return the currently authenticated user's profile.
+    Get or update the currently authenticated user's profile.
+
+    - GET        /api/v1/auth/me/       -> current user data
+    - PATCH/PUT  /api/v1/auth/me/       -> update provided fields only
     """
 
-    serializer_class = UserSerializer
+    permission_classes = [permissions.IsAuthenticated]
 
     def get_object(self):
         return self.request.user
+
+    def get_serializer_class(self):
+        # Use a different serializer for updates so fields are optional.
+        if self.request.method in ("PUT", "PATCH"):
+            return UserUpdateSerializer
+        return UserSerializer
+
+    def update(self, request, *args, **kwargs):
+        # Always treat updates as partial so only provided fields are required.
+        kwargs["partial"] = True
+        return super().update(request, *args, **kwargs)
 
 
 class EmailOrUsernameTokenObtainPairSerializer(serializers.Serializer):
