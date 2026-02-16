@@ -19,17 +19,29 @@ class UserSerializer(serializers.ModelSerializer):
     def get_avatar(self, obj) -> str | None:
         """
         Return an absolute URL for the user's avatar if available.
+        Cloudinary storage returns absolute HTTPS URLs directly.
         """
 
         if not getattr(obj, "avatar", None):
             return None
 
-        request = self.context.get("request")
-        if request is None:
-            # Fallback to relative URL
-            return obj.avatar.url
-
-        return request.build_absolute_uri(obj.avatar.url)
+        try:
+            avatar_url = obj.avatar.url
+            # Cloudinary returns absolute HTTPS URLs like:
+            # https://res.cloudinary.com/{cloud_name}/image/upload/...
+            if isinstance(avatar_url, str):
+                # If it's already an absolute URL (Cloudinary), return it
+                if avatar_url.startswith(("http://", "https://")):
+                    return avatar_url
+                # If it's a relative path (shouldn't happen with Cloudinary), build absolute
+                request = self.context.get("request")
+                if request:
+                    return request.build_absolute_uri(avatar_url)
+                return avatar_url
+            return str(avatar_url)
+        except Exception:
+            # If there's any error getting the URL, return None
+            return None
 
 
 class RegisterSerializer(serializers.ModelSerializer):

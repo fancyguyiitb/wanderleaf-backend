@@ -80,10 +80,43 @@ class AvatarUploadView(generics.GenericAPIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        # Validate file type (images only)
+        allowed_types = ["image/jpeg", "image/jpg", "image/png", "image/webp", "image/gif"]
+        if avatar_file.content_type not in allowed_types:
+            return Response(
+                {"detail": "Invalid file type. Only JPEG, PNG, WebP, and GIF images are allowed."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Validate file size (max 5MB)
+        max_size = 5 * 1024 * 1024  # 5MB in bytes
+        if avatar_file.size > max_size:
+            return Response(
+                {"detail": "File size exceeds 5MB limit. Please upload a smaller image."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        # Delete old avatar if it exists
+        if user.avatar:
+            try:
+                user.avatar.delete(save=False)
+            except Exception:
+                pass  # Ignore errors deleting old avatar
+        
+        # Assign and save - Cloudinary storage will handle the upload
         user.avatar = avatar_file
         user.save(update_fields=["avatar"])
+        
+        # Refresh from DB to ensure we have the latest Cloudinary URL
+        user.refresh_from_db()
+        
+        # Debug: Log the avatar URL to verify Cloudinary is working
+        if user.avatar:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"Avatar uploaded - URL: {user.avatar.url}, Storage: {user.avatar.storage}")
 
-        serializer = self.get_serializer(user)
+        serializer = self.get_serializer(user, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
     def delete(self, request, *args, **kwargs):
@@ -96,7 +129,7 @@ class AvatarUploadView(generics.GenericAPIView):
             # This removes the file from storage and clears the field.
             user.avatar.delete(save=True)
 
-        serializer = self.get_serializer(user)
+        serializer = self.get_serializer(user, context={"request": request})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
