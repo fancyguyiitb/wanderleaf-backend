@@ -32,6 +32,9 @@ INSTALLED_APPS = [
     "allauth.account",
     "dj_rest_auth.registration",
     "channels",
+    # Cloud media storage (ALL environments)
+    "cloudinary_storage",
+    "cloudinary",
     # project apps
     "apps.common.apps.CommonConfig",
     "apps.users.apps.UsersConfig",
@@ -124,8 +127,48 @@ STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS: list[Path] = []
 
+# Media files base URL (not used for local files; Cloudinary will generate full URLs)
 MEDIA_URL = "/media/"
-MEDIA_ROOT = BASE_DIR / "media"
+
+# Cloudinary configuration (used in ALL environments via STORAGES)
+CLOUDINARY_CLOUD_NAME = os.getenv("CLOUDINARY_CLOUD_NAME")
+CLOUDINARY_API_KEY = os.getenv("CLOUDINARY_API_KEY")
+CLOUDINARY_API_SECRET = os.getenv("CLOUDINARY_API_SECRET")
+
+if not (CLOUDINARY_CLOUD_NAME and CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET):
+    raise RuntimeError(
+        "Cloudinary credentials are required. "
+        "Set CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET in your environment."
+    )
+
+import cloudinary  # noqa: E402
+import cloudinary.api  # noqa: E402
+import cloudinary.uploader  # noqa: E402
+
+CLOUDINARY_STORAGE = {
+    "CLOUD_NAME": CLOUDINARY_CLOUD_NAME,
+    "API_KEY": CLOUDINARY_API_KEY,
+    "API_SECRET": CLOUDINARY_API_SECRET,
+    # Force secure URLs (HTTPS)
+    "SECURE": True,
+}
+
+# Django 5+ storage configuration
+STORAGES = {
+    "default": {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+    },
+}
+
+cloudinary.config(
+    cloud_name=CLOUDINARY_CLOUD_NAME,
+    api_key=CLOUDINARY_API_KEY,
+    api_secret=CLOUDINARY_API_SECRET,
+    secure=True,  # Force HTTPS URLs
+)
 
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"

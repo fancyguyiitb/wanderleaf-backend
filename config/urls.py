@@ -11,4 +11,3 @@ urlpatterns = [
     path("api/v1/reviews/", include("apps.reviews.api.urls")),
     path("api/v1/messaging/", include("apps.messaging.api.urls")),
 ]
-
