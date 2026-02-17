@@ -1,8 +1,10 @@
 import uuid
 
+import cloudinary.uploader
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 from apps.listings.models import Listing
@@ -104,6 +106,15 @@ class ListingViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         serializer.save(host=self.request.user)
 
+    def create(self, request, *args, **kwargs):
+        """Use the write serializer for validation, return the detail serializer."""
+        write_serializer = self.get_serializer(data=request.data)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_create(write_serializer)
+        instance = write_serializer.instance
+        read_serializer = ListingDetailSerializer(instance, context={"request": request})
+        return Response(read_serializer.data, status=status.HTTP_201_CREATED)
+
     @action(detail=False, methods=["get"], url_path="my", permission_classes=[permissions.IsAuthenticated])
     def my_listings(self, request):
         """
@@ -117,6 +128,70 @@ class ListingViewSet(viewsets.ModelViewSet):
             return self.get_paginated_response(serializer.data)
         serializer = ListingListSerializer(qs, many=True, context={"request": request})
         return Response(serializer.data)
+
+    @action(
+        detail=False,
+        methods=["post"],
+        url_path="upload-images",
+        permission_classes=[permissions.IsAuthenticated],
+        parser_classes=[MultiPartParser, FormParser],
+    )
+    def upload_images(self, request):
+        """
+        POST /api/v1/listings/upload-images/
+        Accepts multipart file uploads, pushes each to Cloudinary,
+        and returns a list of secure URLs.
+
+        Send files as 'images' (multiple files) in multipart/form-data.
+        """
+        files = request.FILES.getlist("images")
+        if not files:
+            return Response(
+                {"detail": "No image files provided. Send files under the 'images' key."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if len(files) > 10:
+            return Response(
+                {"detail": "Maximum 10 images allowed per upload."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        allowed_types = {"image/jpeg", "image/png", "image/webp", "image/gif"}
+        max_size = 10 * 1024 * 1024  # 10 MB
+
+        urls = []
+        errors = []
+
+        for i, f in enumerate(files):
+            if f.content_type not in allowed_types:
+                errors.append(f"File {i + 1} ({f.name}): unsupported type '{f.content_type}'.")
+                continue
+            if f.size > max_size:
+                errors.append(f"File {i + 1} ({f.name}): exceeds 10 MB limit.")
+                continue
+
+            try:
+                result = cloudinary.uploader.upload(
+                    f,
+                    folder="wanderleaf/listings",
+                    resource_type="image",
+                    transformation=[
+                        {"width": 1200, "height": 800, "crop": "limit", "quality": "auto"},
+                    ],
+                )
+                urls.append(result["secure_url"])
+            except Exception as e:
+                errors.append(f"File {i + 1} ({f.name}): upload failed — {str(e)}")
+
+        return Response(
+            {
+                "urls": urls,
+                "uploaded": len(urls),
+                "errors": errors,
+            },
+            status=status.HTTP_200_OK if urls else status.HTTP_400_BAD_REQUEST,
+        )
 
     @action(detail=False, methods=["get"], url_path="host/(?P<host_id>[^/.]+)", permission_classes=[permissions.AllowAny])
     def host_listings(self, request, host_id=None):
