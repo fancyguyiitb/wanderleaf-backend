@@ -7,7 +7,7 @@ from apps.users.serializers import UserSerializer
 class HostSummarySerializer(serializers.Serializer):
     """Inline read-only representation of the host on a listing."""
 
-    id = serializers.IntegerField(source="host.id", read_only=True)
+    id = serializers.UUIDField(source="host.id", read_only=True)
     name = serializers.CharField(source="host.username", read_only=True)
     email = serializers.EmailField(source="host.email", read_only=True)
     avatar = serializers.SerializerMethodField()

@@ -1,3 +1,6 @@
+import uuid
+
+from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
 from rest_framework.response import Response
@@ -25,7 +28,7 @@ class IsHostOrReadOnly(permissions.BasePermission):
     def has_object_permission(self, request, view, obj):
         if request.method in permissions.SAFE_METHODS:
             return True
-        return obj.host == request.user
+        return str(obj.host_id) == str(request.user.id)
 
 
 class ListingViewSet(viewsets.ModelViewSet):
@@ -37,13 +40,14 @@ class ListingViewSet(viewsets.ModelViewSet):
     Update / Delete  : only the host who owns the listing.
 
     Endpoints (via router):
-        GET    /api/v1/listings/              list
-        POST   /api/v1/listings/              create
-        GET    /api/v1/listings/{id}/         retrieve
-        PUT    /api/v1/listings/{id}/         full update
-        PATCH  /api/v1/listings/{id}/         partial update
-        DELETE /api/v1/listings/{id}/         destroy
-        GET    /api/v1/listings/my/           list current user's listings
+        GET    /api/v1/listings/                    list
+        POST   /api/v1/listings/                    create
+        GET    /api/v1/listings/{uuid}/             retrieve
+        PUT    /api/v1/listings/{uuid}/             full update
+        PATCH  /api/v1/listings/{uuid}/             partial update
+        DELETE /api/v1/listings/{uuid}/             destroy
+        GET    /api/v1/listings/my/                 list current user's listings
+        GET    /api/v1/listings/host/{uuid}/        list a host's public listings
     """
 
     permission_classes = [IsHostOrReadOnly]
@@ -55,11 +59,9 @@ class ListingViewSet(viewsets.ModelViewSet):
     def get_queryset(self):
         qs = Listing.objects.select_related("host").all()
 
-        # For public list, only show active listings (unless fetching own)
         if self.action == "list":
             qs = qs.filter(is_active=True)
 
-        # Optional query-param filters
         category = self.request.query_params.get("category")
         if category:
             qs = qs.filter(category=category)
@@ -89,8 +91,17 @@ class ListingViewSet(viewsets.ModelViewSet):
             return ListingDetailSerializer
         return ListingListSerializer
 
+    def get_object(self):
+        """Override to return 404 on malformed UUIDs instead of 500."""
+        pk = self.kwargs.get("pk", "")
+        try:
+            uuid.UUID(str(pk))
+        except ValueError:
+            from rest_framework.exceptions import NotFound
+            raise NotFound(detail="Listing not found.")
+        return super().get_object()
+
     def perform_create(self, serializer):
-        """Automatically set the host to the current authenticated user."""
         serializer.save(host=self.request.user)
 
     @action(detail=False, methods=["get"], url_path="my", permission_classes=[permissions.IsAuthenticated])
@@ -110,12 +121,20 @@ class ListingViewSet(viewsets.ModelViewSet):
     @action(detail=False, methods=["get"], url_path="host/(?P<host_id>[^/.]+)", permission_classes=[permissions.AllowAny])
     def host_listings(self, request, host_id=None):
         """
-        GET /api/v1/listings/host/{user_id}/
-        Returns all active listings from a specific host. Public endpoint — no auth needed.
+        GET /api/v1/listings/host/{user_uuid}/
+        Returns all active listings from a specific host. Public endpoint.
         """
+        try:
+            host_uuid = uuid.UUID(str(host_id))
+        except (ValueError, AttributeError):
+            return Response(
+                {"detail": "Invalid host ID format. Expected a UUID."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         qs = (
             Listing.objects.select_related("host")
-            .filter(host_id=host_id, is_active=True)
+            .filter(host_id=host_uuid, is_active=True)
             .order_by("-created_at")
         )
         page = self.paginate_queryset(qs)
