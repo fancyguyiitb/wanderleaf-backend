@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.models import AbstractUser
 from django.db import models
 
@@ -12,6 +14,8 @@ class User(TimeStampedModel, AbstractUser):
     - `email` and `phone_number` are unique identifiers.
     - `avatar` optionally stores a profile photo.
     """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
     # Use a plain CharField for full name, not the default username validators,
     # and allow duplicate names.

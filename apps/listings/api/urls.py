@@ -1,7 +1,11 @@
-from django.urls import path
+from django.urls import path, include
+from rest_framework.routers import DefaultRouter
 
+from .views import ListingViewSet
 
-urlpatterns: list = [
-    # listing endpoints (ViewSets / routers) will be added here
+router = DefaultRouter()
+router.register("", ListingViewSet, basename="listing")
+
+urlpatterns = [
+    path("", include(router.urls)),
 ]
-
