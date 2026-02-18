@@ -115,6 +115,17 @@ class ListingViewSet(viewsets.ModelViewSet):
         read_serializer = ListingDetailSerializer(instance, context={"request": request})
         return Response(read_serializer.data, status=status.HTTP_201_CREATED)
 
+    def update(self, request, *args, **kwargs):
+        """Use the write serializer for validation, return the detail serializer."""
+        partial = kwargs.pop("partial", False)
+        instance = self.get_object()
+        write_serializer = self.get_serializer(instance, data=request.data, partial=partial)
+        write_serializer.is_valid(raise_exception=True)
+        self.perform_update(write_serializer)
+        instance.refresh_from_db()
+        read_serializer = ListingDetailSerializer(instance, context={"request": request})
+        return Response(read_serializer.data)
+
     @action(detail=False, methods=["get"], url_path="my", permission_classes=[permissions.IsAuthenticated])
     def my_listings(self, request):
         """
