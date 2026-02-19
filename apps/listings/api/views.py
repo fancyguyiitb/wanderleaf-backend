@@ -1,6 +1,7 @@
 import uuid
 
 import cloudinary.uploader
+from django.db.models import Q
 from django.shortcuts import get_object_or_404
 from rest_framework import viewsets, permissions, status, filters
 from rest_framework.decorators import action
@@ -13,6 +14,36 @@ from apps.listings.serializers import (
     ListingDetailSerializer,
     ListingCreateUpdateSerializer,
 )
+
+
+class FuzzySearchFilter(filters.SearchFilter):
+    """
+    Splits the search query by commas into separate terms, then matches
+    any term against any search field (OR logic).  This handles queries
+    like "Asheville, North Carolina" by searching for listings whose
+    title/location/description/category contain "Asheville" OR
+    "North Carolina", rather than requiring every word to match.
+    """
+
+    def filter_queryset(self, request, queryset, view):
+        search_param = self.get_search_terms(request)
+        if not search_param:
+            return queryset
+
+        raw_query = request.query_params.get(self.search_param, "")
+        search_fields = self.get_search_fields(view, request)
+
+        if not search_fields or not raw_query.strip():
+            return queryset
+
+        parts = [p.strip() for p in raw_query.split(",") if p.strip()]
+
+        combined = Q()
+        for part in parts:
+            for field in search_fields:
+                combined |= Q(**{f"{field}__icontains": part})
+
+        return queryset.filter(combined).distinct()
 
 
 class IsHostOrReadOnly(permissions.BasePermission):
@@ -53,7 +84,7 @@ class ListingViewSet(viewsets.ModelViewSet):
     """
 
     permission_classes = [IsHostOrReadOnly]
-    filter_backends = [filters.SearchFilter, filters.OrderingFilter]
+    filter_backends = [FuzzySearchFilter, filters.OrderingFilter]
     search_fields = ["title", "location", "description", "category"]
     ordering_fields = ["price_per_night", "created_at", "bedrooms", "max_guests"]
     ordering = ["-created_at"]
