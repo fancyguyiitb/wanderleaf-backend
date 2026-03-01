@@ -43,6 +43,7 @@ INSTALLED_APPS = [
     "apps.payments.apps.PaymentsConfig",
     "apps.reviews.apps.ReviewsConfig",
     "apps.messaging.apps.MessagingConfig",
+    "apps.wishlist.apps.WishlistConfig",
 ]
 
 SITE_ID = 1
