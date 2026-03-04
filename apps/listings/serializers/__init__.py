@@ -1,7 +1,12 @@
 from rest_framework import serializers
 
+from apps.bookings.services import BookingService
 from apps.listings.models import Listing
 from apps.users.serializers import UserSerializer
+
+# Fee constants exposed for frontend price calculation (must match BookingService)
+SERVICE_FEE_PERCENT = 12
+CLEANING_FEE_DEFAULT = 25
 
 
 class HostSummarySerializer(serializers.Serializer):
@@ -62,10 +67,14 @@ class ListingListSerializer(serializers.ModelSerializer):
 class ListingDetailSerializer(serializers.ModelSerializer):
     """
     Full serializer used for retrieve/detail views.
-    Includes everything: full description and host details.
+    Includes everything: full description, host details, booked dates for the
+    calendar picker, and fee constants for frontend price calculation.
     """
 
     host = HostSummarySerializer(source="*", read_only=True)
+    booked_dates = serializers.SerializerMethodField()
+    service_fee_percent = serializers.SerializerMethodField()
+    cleaning_fee = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -85,10 +94,35 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "longitude",
             "is_active",
             "host",
+            "booked_dates",
+            "service_fee_percent",
+            "cleaning_fee",
             "created_at",
             "updated_at",
         ]
         read_only_fields = ["id", "created_at", "updated_at"]
+
+    def get_booked_dates(self, obj) -> list[dict]:
+        """
+        Returns list of {check_in, check_out} for active bookings.
+        Use these to disable dates in the calendar picker.
+        """
+        ranges = BookingService.get_booked_dates(str(obj.id))
+        return [
+            {
+                "check_in": r["check_in"].isoformat(),
+                "check_out": r["check_out"].isoformat(),
+            }
+            for r in ranges
+        ]
+
+    def get_service_fee_percent(self, obj) -> int:
+        """Service fee percentage (12%) for frontend price calculation."""
+        return SERVICE_FEE_PERCENT
+
+    def get_cleaning_fee(self, obj) -> float:
+        """Default cleaning fee for frontend price calculation."""
+        return float(CLEANING_FEE_DEFAULT)
 
 
 class ListingCreateUpdateSerializer(serializers.ModelSerializer):
