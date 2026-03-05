@@ -4,11 +4,12 @@ Unified seed script: Indian listings + bookings.
 - Logs in as existing users (no registration).
 - Distributes 16 properties across 6 hosts.
 - Creates 2–3 bookings per listing from other users.
-- Every user has at least 1 booking. All bookings confirmed with successful payments.
+- Every user has at least 1 booking. Bookings are created but remain pending payment (Razorpay required for confirmation).
 
 Usage:
     1. Backend server running. Users already registered (seed_users.py).
-    2. Run:  python seed_all.py
+    2. Razorpay configured (RZP_TEST_KEY_ID, RZP_TEST_KEY_SECRET in .env).
+    3. Run:  python seed_all.py
 """
 
 import json
@@ -120,9 +121,6 @@ def create_booking(token: str, listing_id: str, check_in: date, check_out: date,
     return None
 
 
-def confirm_booking(token: str, booking_id: str) -> bool:
-    resp = requests.post(f"{BOOKINGS_ENDPOINT}{booking_id}/confirm/", headers={"Authorization": f"Bearer {token}"})
-    return resp.status_code == 200
 
 
 def gen_dates_for_listing(listing_idx: int, booking_idx: int, used_ranges: list) -> tuple[date, date]:
@@ -209,10 +207,9 @@ def main():
                 mg = int(ldata.get("max_guests", 4))
                 bookings_to_create.append((lid, he, email, ci, co, min(random.randint(1, mg), 6)))
 
-    # ─── 4. Create and confirm all bookings ───
+    # ─── 4. Create bookings ───
     print("\n[3/4] Creating bookings...")
     created = 0
-    confirmed = 0
     failed = 0
     for listing_id, host_email, guest_email, check_in, check_out, num_guests in bookings_to_create:
         token = tokens.get(guest_email)
@@ -223,20 +220,16 @@ def main():
         result = create_booking(token, listing_id, check_in, check_out, num_guests, req)
         if result:
             booking = result.get("booking", {})
-            bid = booking.get("id")
             total = booking.get("total_price")
-            if bid and confirm_booking(token, bid):
-                confirmed += 1
             created += 1
-            print(f"  Guest: {guest_email.split('@')[0]} → {check_in} to {check_out} ₹{total} [CONFIRMED]")
+            print(f"  Guest: {guest_email.split('@')[0]} → {check_in} to {check_out} ₹{total} [PENDING]")
         else:
             failed += 1
 
     print("\n[4/4] Summary")
     print("=" * 60)
     print(f"  Listings created:   {len(created_listings)} (6 hosts)")
-    print(f"  Bookings created:   {created}")
-    print(f"  Bookings confirmed: {confirmed} (successful payment)")
+    print(f"  Bookings created:   {created} (all pending payment)")
     print(f"  Failed:             {failed}")
     print(f"  Users with bookings: {len(guests_needed)}")
     print("=" * 60)

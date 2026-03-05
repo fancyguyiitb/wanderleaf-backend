@@ -169,30 +169,10 @@ class BookingService:
             amount=price.total_price,
             currency="INR",
             status=Payment.Status.PENDING,
-            payment_method=Payment.PaymentMethod.PLACEHOLDER,
+            payment_method=Payment.PaymentMethod.CARD,
         )
 
         return booking, None
-
-    @staticmethod
-    @transaction.atomic
-    def confirm_booking(booking: Booking) -> tuple[bool, str]:
-        """
-        Confirm a booking after successful payment.
-        This is a placeholder - will be called by payment webhook later.
-        """
-        if booking.status != Booking.Status.PENDING_PAYMENT:
-            return False, f"Cannot confirm booking with status '{booking.status}'."
-
-        booking.status = Booking.Status.CONFIRMED
-        booking.save(update_fields=["status", "updated_at"])
-
-        payment = booking.payments.filter(status=Payment.Status.PENDING).first()
-        if payment:
-            payment.status = Payment.Status.COMPLETED
-            payment.save(update_fields=["status", "updated_at"])
-
-        return True, "Booking confirmed successfully."
 
     @staticmethod
     @transaction.atomic
@@ -319,33 +299,13 @@ class PaymentService:
         }
 
     @staticmethod
-    def create_payment_intent(booking: Booking) -> dict:
+    def create_payment_intent(booking: Booking) -> dict | None:
         """
         Create a Razorpay order for the booking.
         Returns payment info for frontend including order_id and razorpay_key_id.
-        Falls back to placeholder if Razorpay is not configured.
+        Returns None if Razorpay is not configured or order creation fails.
         """
-        razorpay_data = PaymentService.create_razorpay_order(booking)
-        if razorpay_data:
-            return razorpay_data
-
-        payment = booking.payments.filter(status=Payment.Status.PENDING).first()
-        if not payment:
-            payment = Payment.objects.create(
-                booking=booking,
-                amount=booking.total_price,
-                currency="INR",
-                status=Payment.Status.PENDING,
-                payment_method=Payment.PaymentMethod.PLACEHOLDER,
-            )
-        return {
-            "payment_id": str(payment.id),
-            "amount": float(payment.amount),
-            "currency": "INR",
-            "status": payment.status,
-            "order_id": None,
-            "razorpay_key_id": None,
-        }
+        return PaymentService.create_razorpay_order(booking)
 
     @staticmethod
     def verify_razorpay_payment(

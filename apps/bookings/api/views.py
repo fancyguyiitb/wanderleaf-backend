@@ -47,7 +47,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         
         GET    /api/v1/bookings/host/               - List bookings for host's listings
         POST   /api/v1/bookings/{uuid}/cancel/      - Cancel with reason
-        POST   /api/v1/bookings/{uuid}/confirm/     - Confirm booking (placeholder)
         
         POST   /api/v1/bookings/check-availability/ - Check listing availability
         POST   /api/v1/bookings/calculate-price/    - Calculate booking price
@@ -143,6 +142,15 @@ class BookingViewSet(viewsets.ModelViewSet):
             )
 
         payment_info = PaymentService.create_payment_intent(booking)
+        if payment_info is None:
+            booking.delete()
+            return Response(
+                {
+                    "detail": "Payment gateway is not available. Please ensure Razorpay is configured (RZP_TEST_KEY_ID, RZP_TEST_KEY_SECRET).",
+                    "code": "payment_gateway_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
@@ -242,42 +250,6 @@ class BookingViewSet(viewsets.ModelViewSet):
             cancelled_by=request.user,
             reason=serializer.validated_data.get("reason", ""),
         )
-
-        if not success:
-            return Response(
-                {"detail": message},
-                status=status.HTTP_400_BAD_REQUEST,
-            )
-
-        response_serializer = BookingDetailSerializer(
-            booking, context={"request": request}
-        )
-        return Response({
-            "detail": message,
-            "booking": response_serializer.data,
-        })
-
-    @action(
-        detail=True,
-        methods=["post"],
-        url_path="confirm",
-        permission_classes=[permissions.IsAuthenticated],
-    )
-    def confirm(self, request, pk=None):
-        """
-        POST /api/v1/bookings/{uuid}/confirm/
-        Placeholder endpoint to confirm a booking (simulates successful payment).
-        Use verify-payment for Razorpay verification.
-        """
-        booking = self.get_object()
-
-        if str(booking.guest_id) != str(request.user.id):
-            return Response(
-                {"detail": "Only the guest can confirm payment."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        success, message = BookingService.confirm_booking(booking)
 
         if not success:
             return Response(
