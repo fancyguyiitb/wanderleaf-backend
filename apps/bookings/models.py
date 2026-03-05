@@ -112,6 +112,11 @@ class Booking(TimeStampedModel):
         help_text="Any special requests from the guest.",
     )
 
+    payment_retry_disallowed = models.BooleanField(
+        default=False,
+        help_text="When True, payment retry is not allowed (e.g. verification failed; money may have been charged).",
+    )
+
     class Meta:
         ordering = ["-created_at"]
         indexes = [

@@ -164,8 +164,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
 
     def retrieve(self, request, *args, **kwargs):
-        """Get booking details."""
+        """Get booking details. Auto-cancels expired pending payments."""
         booking = self.get_object()
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
         serializer = BookingDetailSerializer(booking, context={"request": request})
         return Response(serializer.data)
 
@@ -303,8 +305,12 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
 
         if not success:
+            BookingService.mark_payment_retry_disallowed(booking)
             return Response(
-                {"detail": message},
+                {
+                    "detail": message,
+                    "code": "payment_verification_failed",
+                },
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
@@ -316,6 +322,63 @@ class BookingViewSet(viewsets.ModelViewSet):
             "detail": message,
             "booking": response_serializer.data,
         })
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="retry-payment",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def retry_payment(self, request, pk=None):
+        """
+        POST /api/v1/bookings/{uuid}/retry-payment/
+        Get a new Razorpay order for a pending booking. Only allowed within 15 minutes
+        and only if payment_retry_disallowed is False (user cancelled / pre-deduction failure).
+        """
+        booking = self.get_object()
+
+        if str(booking.guest_id) != str(request.user.id):
+            return Response(
+                {"detail": "Only the guest can retry payment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if booking.status != Booking.Status.PENDING_PAYMENT:
+            return Response(
+                {"detail": "This booking is not pending payment."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        if booking.payment_retry_disallowed:
+            return Response(
+                {
+                    "detail": "Payment retry is not allowed. Your payment may have been processed. Please contact support with your booking ID if you were charged.",
+                    "code": "payment_retry_disallowed",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
+            return Response(
+                {
+                    "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",
+                    "code": "payment_window_expired",
+                },
+                status=status.HTTP_410_GONE,
+            )
+
+        payment_info = PaymentService.create_payment_intent(booking)
+        if payment_info is None:
+            return Response(
+                {
+                    "detail": "Payment gateway is not available.",
+                    "code": "payment_gateway_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(payment_info)
 
     @action(
         detail=False,

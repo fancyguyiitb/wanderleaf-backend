@@ -101,6 +101,8 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     host = serializers.SerializerMethodField()
     status_display = serializers.CharField(source="get_status_display", read_only=True)
     can_be_cancelled = serializers.BooleanField(read_only=True)
+    payment_retry_disallowed = serializers.BooleanField(read_only=True)
+    payment_deadline_seconds = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -121,12 +123,18 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             "status",
             "status_display",
             "can_be_cancelled",
+            "payment_retry_disallowed",
+            "payment_deadline_seconds",
             "special_requests",
             "cancellation_reason",
             "cancelled_at",
             "created_at",
             "updated_at",
         ]
+
+    def get_payment_deadline_seconds(self, obj) -> int:
+        from apps.bookings.services import BookingService
+        return BookingService.get_seconds_until_payment_expiry(obj)
         read_only_fields = fields
 
     def get_host(self, obj) -> dict:

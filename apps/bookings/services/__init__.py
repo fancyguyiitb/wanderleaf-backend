@@ -1,6 +1,6 @@
 import os
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
@@ -17,6 +17,7 @@ from apps.users.models import User
 
 SERVICE_FEE_PERCENTAGE = Decimal("0.12")  # 12% service fee
 CLEANING_FEE_DEFAULT = Decimal("250.00")  # Default cleaning fee (INR)
+PAYMENT_WINDOW_SECONDS = 15 * 60  # 15 minutes - non-overridable
 
 
 @dataclass
@@ -228,6 +229,41 @@ class BookingService:
         booking.save(update_fields=["status", "updated_at"])
 
         return True, "Booking marked as completed."
+
+    @staticmethod
+    @transaction.atomic
+    def check_and_cancel_expired(booking: Booking) -> bool:
+        """
+        If booking is PENDING_PAYMENT and created more than 15 minutes ago,
+        cancel it with reason and return True. Otherwise return False.
+        """
+        if booking.status != Booking.Status.PENDING_PAYMENT:
+            return False
+        elapsed = (timezone.now() - booking.created_at).total_seconds()
+        if elapsed < PAYMENT_WINDOW_SECONDS:
+            return False
+        reason = f"Payment window expired (15 minutes). Dates freed at {timezone.now().isoformat()}."
+        BookingService.cancel_booking(
+            booking=booking,
+            cancelled_by=booking.guest,
+            reason=reason,
+        )
+        return True
+
+    @staticmethod
+    def get_seconds_until_payment_expiry(booking: Booking) -> int:
+        """Returns seconds remaining for payment, or 0 if expired/inapplicable."""
+        if booking.status != Booking.Status.PENDING_PAYMENT:
+            return 0
+        elapsed = (timezone.now() - booking.created_at).total_seconds()
+        remaining = int(PAYMENT_WINDOW_SECONDS - elapsed)
+        return max(0, remaining)
+
+    @staticmethod
+    def mark_payment_retry_disallowed(booking: Booking) -> None:
+        """Call when verify-payment fails (money may have been charged)."""
+        booking.payment_retry_disallowed = True
+        booking.save(update_fields=["payment_retry_disallowed", "updated_at"])
 
 
 class PaymentService:
