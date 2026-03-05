@@ -1,8 +1,10 @@
+import os
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Optional
 
+from django.conf import settings
 from django.db import transaction
 from django.db.models import Q
 from django.utils import timezone
@@ -165,7 +167,7 @@ class BookingService:
         Payment.objects.create(
             booking=booking,
             amount=price.total_price,
-            currency="USD",
+            currency="INR",
             status=Payment.Status.PENDING,
             payment_method=Payment.PaymentMethod.PLACEHOLDER,
         )
@@ -250,54 +252,148 @@ class BookingService:
 
 class PaymentService:
     """
-    Placeholder payment service.
-    Will be replaced with actual payment gateway integration later.
+    Razorpay payment service for booking payments.
+    Uses Razorpay Standard Checkout (official Python SDK).
+    Test mode uses INR per Razorpay docs.
     """
 
     @staticmethod
-    def create_payment_intent(booking: Booking) -> dict:
+    def create_razorpay_order(booking: Booking) -> dict | None:
         """
-        Placeholder: Create a payment intent.
-        In real implementation, this would call Stripe/Razorpay API.
+        Create a Razorpay order for the booking.
+        Returns order details for frontend Checkout, or None if Razorpay is not configured.
+        Uses INR (paise) per official Razorpay test mode docs.
         """
+        key_id = getattr(settings, "RZP_TEST_KEY_ID", None) or os.getenv("RZP_TEST_KEY_ID")
+        key_secret = getattr(settings, "RZP_TEST_KEY_SECRET", None) or os.getenv("RZP_TEST_KEY_SECRET")
+        if not key_id or not key_secret:
+            return None
+
+        try:
+            import razorpay
+            client = razorpay.Client(auth=(key_id, key_secret))
+        except ImportError:
+            return None
+
         payment = booking.payments.filter(status=Payment.Status.PENDING).first()
         if not payment:
             payment = Payment.objects.create(
                 booking=booking,
                 amount=booking.total_price,
-                currency="USD",
+                currency="INR",
                 status=Payment.Status.PENDING,
+                payment_method=Payment.PaymentMethod.CARD,
             )
+        else:
+            payment.currency = "INR"
+            payment.payment_method = Payment.PaymentMethod.CARD
+            payment.save(update_fields=["currency", "payment_method", "updated_at"])
+
+        # INR: amount in paise (1 INR = 100 paise). Min 100 paise = ₹1.00
+        amount_paise = int(Decimal(str(booking.total_price)) * 100)
+        if amount_paise < 100:
+            amount_paise = 100
+
+        order_data = {
+            "amount": amount_paise,
+            "currency": "INR",
+            "receipt": str(booking.id).replace("-", "")[:40],
+            "notes": {
+                "booking_id": str(booking.id),
+                "payment_id": str(payment.id),
+            },
+        }
+        try:
+            order = client.order.create(data=order_data)
+        except Exception:
+            return None
+        payment.gateway_order_id = order["id"]
+        payment.save(update_fields=["gateway_order_id", "updated_at"])
 
         return {
+            "order_id": order["id"],
+            "razorpay_key_id": key_id,
+            "amount": float(booking.total_price),
+            "currency": "INR",
             "payment_id": str(payment.id),
-            "amount": float(payment.amount),
-            "currency": payment.currency,
-            "status": payment.status,
-            "client_secret": f"placeholder_secret_{payment.id}",
         }
 
     @staticmethod
-    def simulate_payment_success(payment_id: str) -> tuple[bool, str]:
+    def create_payment_intent(booking: Booking) -> dict:
         """
-        Placeholder: Simulate a successful payment.
-        For testing purposes only - remove in production.
+        Create a Razorpay order for the booking.
+        Returns payment info for frontend including order_id and razorpay_key_id.
+        Falls back to placeholder if Razorpay is not configured.
         """
-        try:
-            payment = Payment.objects.get(id=payment_id)
-        except Payment.DoesNotExist:
-            return False, "Payment not found."
+        razorpay_data = PaymentService.create_razorpay_order(booking)
+        if razorpay_data:
+            return razorpay_data
 
-        if payment.status != Payment.Status.PENDING:
-            return False, f"Payment already processed with status '{payment.status}'."
+        payment = booking.payments.filter(status=Payment.Status.PENDING).first()
+        if not payment:
+            payment = Payment.objects.create(
+                booking=booking,
+                amount=booking.total_price,
+                currency="INR",
+                status=Payment.Status.PENDING,
+                payment_method=Payment.PaymentMethod.PLACEHOLDER,
+            )
+        return {
+            "payment_id": str(payment.id),
+            "amount": float(payment.amount),
+            "currency": "INR",
+            "status": payment.status,
+            "order_id": None,
+            "razorpay_key_id": None,
+        }
+
+    @staticmethod
+    def verify_razorpay_payment(
+        booking_id: str,
+        razorpay_order_id: str,
+        razorpay_payment_id: str,
+        razorpay_signature: str,
+    ) -> tuple[bool, str]:
+        """
+        Verify Razorpay payment signature and confirm the booking.
+        Uses official razorpay.Client.utility.verify_payment_signature.
+        """
+        key_secret = getattr(settings, "RZP_TEST_KEY_SECRET", None) or os.getenv("RZP_TEST_KEY_SECRET")
+        if not key_secret:
+            return False, "Payment gateway not configured."
+
+        try:
+            import razorpay
+            key_id = getattr(settings, "RZP_TEST_KEY_ID", None) or os.getenv("RZP_TEST_KEY_ID")
+            client = razorpay.Client(auth=(key_id, key_secret))
+            client.utility.verify_payment_signature({
+                "razorpay_order_id": razorpay_order_id,
+                "razorpay_payment_id": razorpay_payment_id,
+                "razorpay_signature": razorpay_signature,
+            })
+        except ImportError:
+            return False, "Payment gateway not available."
+        except Exception as e:
+            return False, f"Payment verification failed: {str(e)}"
+
+        try:
+            booking = Booking.objects.get(id=booking_id, status=Booking.Status.PENDING_PAYMENT)
+        except Booking.DoesNotExist:
+            return False, "Booking not found or already processed."
+
+        payment = booking.payments.filter(
+            gateway_order_id=razorpay_order_id,
+            status=Payment.Status.PENDING,
+        ).first()
+        if not payment:
+            return False, "Payment record not found."
 
         payment.status = Payment.Status.COMPLETED
-        payment.gateway_payment_id = f"simulated_{payment_id}"
-        payment.save(update_fields=["status", "gateway_payment_id", "updated_at"])
+        payment.gateway_payment_id = razorpay_payment_id
+        payment.gateway_signature = razorpay_signature
+        payment.save(update_fields=["status", "gateway_payment_id", "gateway_signature", "updated_at"])
 
-        booking = payment.booking
-        if booking.status == Booking.Status.PENDING_PAYMENT:
-            booking.status = Booking.Status.CONFIRMED
-            booking.save(update_fields=["status", "updated_at"])
+        booking.status = Booking.Status.CONFIRMED
+        booking.save(update_fields=["status", "updated_at"])
 
-        return True, "Payment successful. Booking confirmed."
+        return True, "Payment verified. Booking confirmed."

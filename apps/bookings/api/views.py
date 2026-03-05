@@ -267,10 +267,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         """
         POST /api/v1/bookings/{uuid}/confirm/
         Placeholder endpoint to confirm a booking (simulates successful payment).
-        In production, this would be triggered by a payment webhook.
+        Use verify-payment for Razorpay verification.
         """
         booking = self.get_object()
-        
+
         if str(booking.guest_id) != str(request.user.id):
             return Response(
                 {"detail": "Only the guest can confirm payment."},
@@ -285,6 +285,58 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        response_serializer = BookingDetailSerializer(
+            booking, context={"request": request}
+        )
+        return Response({
+            "detail": message,
+            "booking": response_serializer.data,
+        })
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="verify-payment",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def verify_payment(self, request, pk=None):
+        """
+        POST /api/v1/bookings/{uuid}/verify-payment/
+        Verify Razorpay payment and confirm booking.
+        Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+        """
+        booking = self.get_object()
+
+        if str(booking.guest_id) != str(request.user.id):
+            return Response(
+                {"detail": "Only the guest can verify payment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        razorpay_order_id = request.data.get("razorpay_order_id")
+        razorpay_payment_id = request.data.get("razorpay_payment_id")
+        razorpay_signature = request.data.get("razorpay_signature")
+
+        if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
+            return Response(
+                {"detail": "razorpay_order_id, razorpay_payment_id, and razorpay_signature are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        success, message = PaymentService.verify_razorpay_payment(
+            booking_id=str(booking.id),
+            razorpay_order_id=razorpay_order_id,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_signature=razorpay_signature,
+        )
+
+        if not success:
+            return Response(
+                {"detail": message},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        booking.refresh_from_db()
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
