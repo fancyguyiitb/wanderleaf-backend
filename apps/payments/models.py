@@ -45,8 +45,8 @@ class Payment(TimeStampedModel):
     )
     currency = models.CharField(
         max_length=3,
-        default="USD",
-        help_text="Currency code (ISO 4217).",
+        default="INR",
+        help_text="Currency code (ISO 4217). INR for Razorpay.",
     )
 
     status = models.CharField(

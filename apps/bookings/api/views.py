@@ -435,7 +435,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             "service_fee": float(price.service_fee),
             "cleaning_fee": float(price.cleaning_fee),
             "total_price": float(price.total_price),
-            "currency": "USD",
+            "currency": "INR",
         })
 
     @action(

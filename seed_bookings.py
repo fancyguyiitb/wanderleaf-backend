@@ -30,23 +30,23 @@ LOGIN_ENDPOINT = f"{BASE_URL}/api/v1/auth/login/"
 LISTINGS_ENDPOINT = f"{BASE_URL}/api/v1/listings/"
 BOOKINGS_ENDPOINT = f"{BASE_URL}/api/v1/bookings/"
 
-# Sample users to book as (these should exist from seed_users.py)
+# Indian users to book as (from seed_users.py)
 GUEST_EMAILS = [
-    "amara.okafor@example.com",
-    "liam.chen@example.com",
-    "sofia.rodriguez@example.com",
-    "yuki.tanaka@example.com",
     "priya.sharma@example.com",
-    "marcus.johansson@example.com",
-    "fatima.alrashid@example.com",
-    "oliver.bennett@example.com",
-    "camille.dubois@example.com",
-    "rafael.costa@example.com",
-    "anya.petrov@example.com",
-    "david.kim@example.com",
-    "zara.mbeki@example.com",
-    "elena.vasquez@example.com",
-    "noah.williams@example.com",
+    "arjun.singh@example.com",
+    "riya.kapoor@example.com",
+    "karthik.iyer@example.com",
+    "meenakshi.nair@example.com",
+    "vikram.mehta@example.com",
+    "anjali.gupta@example.com",
+    "sameer.desai@example.com",
+    "pooja.joshi@example.com",
+    "rahul.chatterjee@example.com",
+    "srinivas.reddy@example.com",
+    "aditi.verma@example.com",
+    "rohit.kumar@example.com",
+    "kavitha.rao@example.com",
+    "debashish.patnaik@example.com",
 ]
 
 
@@ -84,7 +84,7 @@ def create_booking(token: str, listing_id: str, check_in: date, check_out: date,
         "check_in": check_in.isoformat(),
         "check_out": check_out.isoformat(),
         "num_guests": num_guests,
-        "special_requests": random.choice([
+        "        "special_requests": random.choice([
             "",
             "Early check-in if possible",
             "Late checkout requested",
@@ -92,6 +92,8 @@ def create_booking(token: str, listing_id: str, check_in: date, check_out: date,
             "Quiet room preferred",
             "Need extra towels",
             "Arriving late, around 10 PM",
+            "Vegetarian meals only",
+            "Prefer Indian breakfast",
         ]),
     }
     resp = requests.post(
@@ -267,7 +269,7 @@ def seed():
                     f"  [{listing_idx+1}.{booking_idx+1}] OK: {listing_title[:30]}..."
                     f"\n       Guest: {guest_email.split('@')[0]}, "
                     f"Dates: {check_in} -> {check_out}, "
-                    f"${total_price} [{status_str}]"
+                    f"₹{total_price} [{status_str}]"
                 )
                 created += 1
             else:

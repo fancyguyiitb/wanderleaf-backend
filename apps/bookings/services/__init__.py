@@ -16,7 +16,7 @@ from apps.users.models import User
 
 
 SERVICE_FEE_PERCENTAGE = Decimal("0.12")  # 12% service fee
-CLEANING_FEE_DEFAULT = Decimal("25.00")  # Default cleaning fee
+CLEANING_FEE_DEFAULT = Decimal("250.00")  # Default cleaning fee (INR)
 
 
 @dataclass

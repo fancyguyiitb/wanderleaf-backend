@@ -1,12 +1,12 @@
 """
-Seed script: register diverse sample users via the API.
+Seed script: register Indian sample users via the API.
 
 Usage:
     1. Make sure the backend server is running.
     2. Run:  python seed_users.py
 
 No access token needed — registration is a public endpoint.
-All users are created with the password: Wanderleaf2026!
+All users are created with the password: Password123!
 """
 
 import json
@@ -22,81 +22,21 @@ DEFAULT_PASSWORD = "Password123!"
 REGISTER_ENDPOINT = f"{BASE_URL}/api/v1/auth/register/"
 
 USERS = [
-    {
-        "username": "Amara Okafor",
-        "email": "amara.okafor@example.com",
-        "phone_number": "+2348012345678",
-    },
-    {
-        "username": "Liam Chen",
-        "email": "liam.chen@example.com",
-        "phone_number": "+14155551234",
-    },
-    {
-        "username": "Sofia Rodríguez",
-        "email": "sofia.rodriguez@example.com",
-        "phone_number": "+5491123456789",
-    },
-    {
-        "username": "Yuki Tanaka",
-        "email": "yuki.tanaka@example.com",
-        "phone_number": "+819012345678",
-    },
-    {
-        "username": "Priya Sharma",
-        "email": "priya.sharma@example.com",
-        "phone_number": "+919876543210",
-    },
-    {
-        "username": "Marcus Johansson",
-        "email": "marcus.johansson@example.com",
-        "phone_number": "+46701234567",
-    },
-    {
-        "username": "Fatima Al-Rashid",
-        "email": "fatima.alrashid@example.com",
-        "phone_number": "+971501234567",
-    },
-    {
-        "username": "Oliver Bennett",
-        "email": "oliver.bennett@example.com",
-        "phone_number": "+447911123456",
-    },
-    {
-        "username": "Camille Dubois",
-        "email": "camille.dubois@example.com",
-        "phone_number": "+33612345678",
-    },
-    {
-        "username": "Rafael Costa",
-        "email": "rafael.costa@example.com",
-        "phone_number": "+5511987654321",
-    },
-    {
-        "username": "Anya Petrov",
-        "email": "anya.petrov@example.com",
-        "phone_number": "+79161234567",
-    },
-    {
-        "username": "David Kim",
-        "email": "david.kim@example.com",
-        "phone_number": "+821012345678",
-    },
-    {
-        "username": "Zara Mbeki",
-        "email": "zara.mbeki@example.com",
-        "phone_number": "+27821234567",
-    },
-    {
-        "username": "Elena Vasquez",
-        "email": "elena.vasquez@example.com",
-        "phone_number": "+525512345678",
-    },
-    {
-        "username": "Noah Williams",
-        "email": "noah.williams@example.com",
-        "phone_number": "+61412345678",
-    },
+    {"username": "Sarthak Niranjan", "email": "sarthak.niranjan@example.com", "phone_number": "+919876543210"},
+    {"username": "Arjun Singh", "email": "arjun.singh@example.com", "phone_number": "+919123456789"},
+    {"username": "Riya Kapoor", "email": "riya.kapoor@example.com", "phone_number": "+919845678901"},
+    {"username": "Karthik Iyer", "email": "karthik.iyer@example.com", "phone_number": "+919998877665"},
+    {"username": "Meenakshi Nair", "email": "meenakshi.nair@example.com", "phone_number": "+919112233445"},
+    {"username": "Vikram Mehta", "email": "vikram.mehta@example.com", "phone_number": "+919778899001"},
+    {"username": "Anjali Gupta", "email": "anjali.gupta@example.com", "phone_number": "+919334455667"},
+    {"username": "Sameer Desai", "email": "sameer.desai@example.com", "phone_number": "+919556677889"},
+    {"username": "Pooja Joshi", "email": "pooja.joshi@example.com", "phone_number": "+919667788990"},
+    {"username": "Rahul Chatterjee", "email": "rahul.chatterjee@example.com", "phone_number": "+919223344556"},
+    {"username": "Srinivas Reddy", "email": "srinivas.reddy@example.com", "phone_number": "+919889900112"},
+    {"username": "Aditi Verma", "email": "aditi.verma@example.com", "phone_number": "+919445566778"},
+    {"username": "Rohit Kumar", "email": "rohit.kumar@example.com", "phone_number": "+919001122334"},
+    {"username": "Kavitha Rao", "email": "kavitha.rao@example.com", "phone_number": "+919556644332"},
+    {"username": "Debashish Patnaik", "email": "debashish.patnaik@example.com", "phone_number": "+919221100998"},
 ]
 
 
@@ -126,5 +66,5 @@ def seed():
 
 
 if __name__ == "__main__":
-    print(f"Registering {len(USERS)} users at {REGISTER_ENDPOINT}\n")
+    print(f"Registering {len(USERS)} Indian users at {REGISTER_ENDPOINT}\n")
     seed()
