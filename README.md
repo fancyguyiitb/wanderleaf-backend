@@ -12,6 +12,7 @@ cloud PostgreSQL provider).
 - **PostgreSQL** (Supabase in production)
 - **JWT auth** (djangorestframework-simplejwt + dj-rest-auth + django-allauth)
 - **Django Channels + Redis** for real-time features (chat, live updates)
+- **Celery + Redis** for async tasks (per-booking payment expiry timer)
 
 ### High-level structure
 
@@ -25,6 +26,9 @@ cloud PostgreSQL provider).
   - `messaging/` – conversations, chat, notifications
   - `common/` – shared utilities, base models, enums
 
-This repository currently contains only the **skeleton**; the domain models,
-serializers, views, and business logic will be implemented iteratively.
+### Running
+
+- Start Redis (required for Celery): `redis-server`
+- Start Celery worker: `celery -A config worker -l info`
+- Start Django: `python run.py` or `python manage.py runserver`
 

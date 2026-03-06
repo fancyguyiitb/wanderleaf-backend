@@ -116,6 +116,12 @@ class Booking(TimeStampedModel):
         default=False,
         help_text="When True, payment retry is not allowed (e.g. verification failed; money may have been charged).",
     )
+    payment_expiry_task_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Celery task ID for the 15-minute payment expiry timer; cleared when booking is confirmed.",
+    )
 
     class Meta:
         ordering = ["-created_at"]

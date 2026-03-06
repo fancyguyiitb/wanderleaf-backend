@@ -152,6 +152,8 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
+        BookingService.schedule_payment_expiry_timer(booking)
+
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )

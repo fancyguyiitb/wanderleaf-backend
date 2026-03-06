@@ -265,6 +265,38 @@ class BookingService:
         booking.payment_retry_disallowed = True
         booking.save(update_fields=["payment_retry_disallowed", "updated_at"])
 
+    @staticmethod
+    def schedule_payment_expiry_timer(booking: Booking) -> bool:
+        """
+        Schedule an async timer to cancel this PENDING_PAYMENT booking after 15 minutes.
+        Returns True if scheduled, False if Celery is unavailable (retrieve() will still cancel on expiry).
+        """
+        from apps.bookings.tasks import cancel_expired_pending_booking
+
+        try:
+            result = cancel_expired_pending_booking.apply_async(
+                args=[str(booking.id)],
+                countdown=PAYMENT_WINDOW_SECONDS,
+            )
+            booking.payment_expiry_task_id = result.id
+            booking.save(update_fields=["payment_expiry_task_id", "updated_at"])
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def cancel_payment_expiry_timer(booking: Booking) -> None:
+        """Revoke the payment expiry timer when booking is confirmed."""
+        task_id = getattr(booking, "payment_expiry_task_id", None) or ""
+        if not task_id:
+            return
+        try:
+            from celery import current_app
+
+            current_app.control.revoke(task_id)
+        except Exception:
+            pass
+
 
 class PaymentService:
     """
@@ -389,7 +421,10 @@ class PaymentService:
         payment.gateway_signature = razorpay_signature
         payment.save(update_fields=["status", "gateway_payment_id", "gateway_signature", "updated_at"])
 
+        BookingService.cancel_payment_expiry_timer(booking)
+
         booking.status = Booking.Status.CONFIRMED
-        booking.save(update_fields=["status", "updated_at"])
+        booking.payment_expiry_task_id = ""
+        booking.save(update_fields=["status", "payment_expiry_task_id", "updated_at"])
 
         return True, "Payment verified. Booking confirmed."

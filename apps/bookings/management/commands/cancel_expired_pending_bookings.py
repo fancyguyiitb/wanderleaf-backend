@@ -1,8 +1,8 @@
 """
 Cancel PENDING_PAYMENT bookings that are older than 15 minutes.
 
-Run via cron every minute for robustness:
-    * * * * * cd /path/to/project && python manage.py cancel_expired_pending_bookings
+Primary enforcement: per-booking Celery timer (scheduled on create, revoked on confirm).
+This command is for manual repair (e.g. Celery was down when bookings were created).
 """
 from django.core.management.base import BaseCommand
 
