@@ -6,6 +6,24 @@ from apps.bookings.models import Booking
 from apps.listings.models import Listing
 
 
+def _get_booking_status_display(obj: Booking) -> str:
+    """
+    Returns a user-friendly status label.
+    We keep the DB status values stable, but customize display for system-driven cancellations.
+    """
+    try:
+        reason = (obj.cancellation_reason or "").lower()
+    except Exception:
+        reason = ""
+
+    if obj.status == Booking.Status.CANCELLED_BY_GUEST and reason:
+        # Auto-cancel after 15-minute payment window (system-driven).
+        if "payment window expired" in reason or "payment timeout" in reason:
+            return "Cancelled (payment window expired)"
+
+    return obj.get_status_display()
+
+
 class ListingSummarySerializer(serializers.Serializer):
     """Compact listing info for booking responses."""
 
@@ -73,7 +91,7 @@ class BookingListSerializer(serializers.ModelSerializer):
 
     listing = ListingSummarySerializer(read_only=True)
     guest = GuestSummarySerializer(source="*", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -92,6 +110,9 @@ class BookingListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_status_display(self, obj) -> str:
+        return _get_booking_status_display(obj)
+
 
 class BookingDetailSerializer(serializers.ModelSerializer):
     """Serializer for detailed booking view."""
@@ -99,7 +120,7 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     listing = ListingSummarySerializer(read_only=True)
     guest = GuestSummarySerializer(source="*", read_only=True)
     host = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.SerializerMethodField()
     can_be_cancelled = serializers.BooleanField(read_only=True)
     payment_retry_disallowed = serializers.BooleanField(read_only=True)
     payment_deadline_seconds = serializers.SerializerMethodField()
@@ -136,6 +157,9 @@ class BookingDetailSerializer(serializers.ModelSerializer):
         from apps.bookings.services import BookingService
         return BookingService.get_seconds_until_payment_expiry(obj)
         read_only_fields = fields
+
+    def get_status_display(self, obj) -> str:
+        return _get_booking_status_display(obj)
 
     def get_host(self, obj) -> dict:
         host = obj.listing.host
