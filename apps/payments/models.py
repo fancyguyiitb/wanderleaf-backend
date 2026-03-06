@@ -98,6 +98,12 @@ class Payment(TimeStampedModel):
         blank=True,
         help_text="Timestamp when refund was processed.",
     )
+    gateway_refund_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Refund ID from payment gateway (e.g. Razorpay rfnd_xxx).",
+    )
 
     metadata = models.JSONField(
         default=dict,

@@ -4,6 +4,7 @@ from rest_framework import serializers
 
 from apps.bookings.models import Booking
 from apps.listings.models import Listing
+from apps.payments.models import Payment
 
 
 def _get_booking_status_display(obj: Booking) -> str:
@@ -124,6 +125,10 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     can_be_cancelled = serializers.BooleanField(read_only=True)
     payment_retry_disallowed = serializers.BooleanField(read_only=True)
     payment_deadline_seconds = serializers.SerializerMethodField()
+    refund_amount = serializers.SerializerMethodField()
+    refunded_at = serializers.SerializerMethodField()
+    refund_status = serializers.SerializerMethodField()
+    refund_failed = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -146,6 +151,10 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             "can_be_cancelled",
             "payment_retry_disallowed",
             "payment_deadline_seconds",
+            "refund_amount",
+            "refunded_at",
+            "refund_status",
+            "refund_failed",
             "special_requests",
             "cancellation_reason",
             "cancelled_at",
@@ -156,7 +165,34 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     def get_payment_deadline_seconds(self, obj) -> int:
         from apps.bookings.services import BookingService
         return BookingService.get_seconds_until_payment_expiry(obj)
-        read_only_fields = fields
+
+    def get_refund_amount(self, obj):
+        payment = obj.payments.filter(
+            status__in=[Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED]
+        ).first()
+        return float(payment.refund_amount) if payment and payment.refund_amount else None
+
+    def get_refunded_at(self, obj):
+        payment = obj.payments.filter(refunded_at__isnull=False).first()
+        return payment.refunded_at.isoformat() if payment and payment.refunded_at else None
+
+    def get_refund_status(self, obj):
+        payment = obj.payments.filter(
+            status__in=[Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED]
+        ).first()
+        return payment.status if payment else None
+
+    def get_refund_failed(self, obj):
+        """True when booking was cancelled, payment was captured, but refund was not processed."""
+        if obj.status not in (Booking.Status.CANCELLED_BY_GUEST, Booking.Status.CANCELLED_BY_HOST):
+            return False
+        payment = obj.payments.filter(
+            status=Payment.Status.COMPLETED,
+            gateway_payment_id__isnull=False,
+        ).exclude(gateway_payment_id="").first()
+        if not payment:
+            return False
+        return payment.refund_amount < payment.amount
 
     def get_status_display(self, obj) -> str:
         return _get_booking_status_display(obj)

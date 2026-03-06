@@ -174,7 +174,7 @@ class BookingViewSet(viewsets.ModelViewSet):
     def destroy(self, request, *args, **kwargs):
         """Cancel a booking (DELETE method)."""
         booking = self.get_object()
-        success, message = BookingService.cancel_booking(
+        success, message, refund_code = BookingService.cancel_booking(
             booking=booking,
             cancelled_by=request.user,
             reason="Cancelled by user",
@@ -186,10 +186,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response(
-            {"detail": message},
-            status=status.HTTP_200_OK,
-        )
+        payload = {"detail": message}
+        if refund_code:
+            payload["refund_code"] = refund_code
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -247,7 +247,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         serializer = BookingCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        success, message = BookingService.cancel_booking(
+        success, message, refund_code = BookingService.cancel_booking(
             booking=booking,
             cancelled_by=request.user,
             reason=serializer.validated_data.get("reason", ""),
@@ -262,10 +262,13 @@ class BookingViewSet(viewsets.ModelViewSet):
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
-        return Response({
+        payload = {
             "detail": message,
             "booking": response_serializer.data,
-        })
+        }
+        if refund_code:
+            payload["refund_code"] = refund_code
+        return Response(payload)
 
     @action(
         detail=True,

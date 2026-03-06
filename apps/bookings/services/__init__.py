@@ -181,19 +181,24 @@ class BookingService:
         booking: Booking,
         cancelled_by: User,
         reason: str = "",
-    ) -> tuple[bool, str]:
+    ) -> tuple[bool, str, str | None]:
         """
-        Cancel a booking.
+        Cancel a booking. Processes refund when applicable (CONFIRMED bookings).
+
+        Returns:
+            Tuple of (success, message, refund_code).
+            refund_code: None | "refund_initiated" | "refund_failed" | "no_refund_needed"
         """
         if not booking.can_be_cancelled:
-            return False, f"Cannot cancel booking with status '{booking.get_status_display()}'."
+            return False, f"Cannot cancel booking with status '{booking.get_status_display()}'.", None
 
         is_host = str(booking.listing.host_id) == str(cancelled_by.id)
         is_guest = str(booking.guest_id) == str(cancelled_by.id)
 
         if not is_host and not is_guest:
-            return False, "You don't have permission to cancel this booking."
+            return False, "You don't have permission to cancel this booking.", None
 
+        was_pending_payment = booking.status == Booking.Status.PENDING_PAYMENT
         if is_host:
             booking.status = Booking.Status.CANCELLED_BY_HOST
         else:
@@ -205,13 +210,52 @@ class BookingService:
             "status", "cancellation_reason", "cancelled_at", "updated_at"
         ])
 
-        pending_payment = booking.payments.filter(status=Payment.Status.PENDING).first()
-        if pending_payment:
-            pending_payment.status = Payment.Status.FAILED
-            pending_payment.failure_reason = "Booking cancelled"
-            pending_payment.save(update_fields=["status", "failure_reason", "updated_at"])
+        refund_code: str | None = None
 
-        return True, "Booking cancelled successfully."
+        if was_pending_payment:
+            # Payment was never captured — mark as failed, no Razorpay refund
+            pending_payment = booking.payments.filter(status=Payment.Status.PENDING).first()
+            if pending_payment:
+                pending_payment.status = Payment.Status.FAILED
+                pending_payment.failure_reason = "Booking cancelled"
+                pending_payment.save(update_fields=["status", "failure_reason", "updated_at"])
+            refund_code = "no_refund_needed"
+            return True, "Booking cancelled successfully.", refund_code
+
+        # CONFIRMED booking — payment was captured, initiate Razorpay refund
+        completed_payment = booking.payments.filter(
+            status=Payment.Status.COMPLETED,
+            gateway_payment_id__isnull=False,
+        ).exclude(gateway_payment_id="").first()
+
+        if not completed_payment:
+            # Edge case: CONFIRMED but no gateway_payment_id (shouldn't happen)
+            refund_code = "refund_failed"
+            return (
+                True,
+                "Booking cancelled. Refund could not be processed automatically. Please contact support with booking ID.",
+                refund_code,
+            )
+
+        success, msg, _ = PaymentService.create_razorpay_refund(
+            completed_payment,
+            notes={
+                "booking_id": str(booking.id),
+                "cancelled_by": "host" if is_host else "guest",
+                "reason": reason[:200] if reason else "",
+            },
+        )
+
+        if success:
+            refund_code = "refund_initiated"
+            return True, "Booking cancelled. Refund has been initiated and will reflect in 5–7 working days.", refund_code
+
+        refund_code = "refund_failed"
+        return (
+            True,
+            f"Booking cancelled. Refund could not be processed: {msg} Please contact support with booking ID.",
+            refund_code,
+        )
 
     @staticmethod
     @transaction.atomic
@@ -398,3 +442,89 @@ class PaymentService:
         booking.save(update_fields=["status", "updated_at"])
 
         return True, "Payment verified. Booking confirmed."
+
+    @staticmethod
+    def create_razorpay_refund(
+        payment: Payment,
+        amount: Decimal | None = None,
+        notes: dict | None = None,
+    ) -> tuple[bool, str, Decimal]:
+        """
+        Create a Razorpay refund for a completed payment.
+
+        Args:
+            payment: Payment record with status=COMPLETED and gateway_payment_id set.
+            amount: Refund amount (default: full amount). Must be <= payment.amount.
+            notes: Optional notes for Razorpay (e.g. {"reason": "booking_cancelled"}).
+
+        Returns:
+            Tuple of (success, message, refund_amount).
+            On success: refund_amount is the amount refunded.
+            On failure: refund_amount is Decimal("0").
+        """
+        from decimal import Decimal as D
+
+        key_id = getattr(settings, "RZP_TEST_KEY_ID", None) or os.getenv("RZP_TEST_KEY_ID")
+        key_secret = getattr(settings, "RZP_TEST_KEY_SECRET", None) or os.getenv("RZP_TEST_KEY_SECRET")
+        if not key_id or not key_secret:
+            return False, "Payment gateway not configured. Refund could not be processed.", D("0")
+
+        if not payment.can_be_refunded:
+            if payment.status != Payment.Status.COMPLETED:
+                return False, f"Cannot refund payment with status '{payment.status}'.", D("0")
+            if payment.refund_amount >= payment.amount:
+                return False, "Payment has already been fully refunded.", D("0")
+
+        if not payment.gateway_payment_id:
+            return False, "No gateway payment ID. Refund must be processed manually.", D("0")
+
+        refund_amount = amount if amount is not None else payment.amount - payment.refund_amount
+        refund_amount = min(refund_amount, payment.amount - payment.refund_amount)
+        if refund_amount <= 0:
+            return False, "No amount remaining to refund.", D("0")
+
+        # INR: amount in paise
+        amount_paise = int(Decimal(str(refund_amount)) * 100)
+        if amount_paise < 100:
+            return False, "Refund amount must be at least ₹1.00.", D("0")
+
+        try:
+            import razorpay
+            client = razorpay.Client(auth=(key_id, key_secret))
+        except ImportError:
+            return False, "Payment gateway not available.", D("0")
+
+        refund_data = {
+            "amount": amount_paise,
+            "notes": notes or {},
+        }
+
+        try:
+            refund = client.payment.refund(
+                payment.gateway_payment_id,
+                refund_data,
+            )
+        except Exception as e:
+            err_msg = str(e).lower()
+            if "fully refunded" in err_msg or "already refunded" in err_msg:
+                return False, "Payment has already been fully refunded.", D("0")
+            if "greater than" in err_msg or "amount captured" in err_msg:
+                return False, "Refund amount exceeds captured amount.", D("0")
+            if "6 months" in err_msg or "too old" in err_msg:
+                return False, "Refund not possible for payments older than 6 months.", D("0")
+            return False, f"Refund failed: {str(e)}", D("0")
+
+        gateway_refund_id = refund.get("id", "")
+        payment.refund_amount += refund_amount
+        payment.refunded_at = timezone.now()
+        payment.gateway_refund_id = gateway_refund_id or payment.gateway_refund_id
+        payment.status = (
+            Payment.Status.REFUNDED
+            if payment.refund_amount >= payment.amount
+            else Payment.Status.PARTIALLY_REFUNDED
+        )
+        payment.save(update_fields=[
+            "refund_amount", "refunded_at", "gateway_refund_id", "status", "updated_at"
+        ])
+
+        return True, "Refund initiated successfully.", refund_amount
