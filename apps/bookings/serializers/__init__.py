@@ -4,6 +4,25 @@ from rest_framework import serializers
 
 from apps.bookings.models import Booking
 from apps.listings.models import Listing
+from apps.payments.models import Payment
+
+
+def _get_booking_status_display(obj: Booking) -> str:
+    """
+    Returns a user-friendly status label.
+    We keep the DB status values stable, but customize display for system-driven cancellations.
+    """
+    try:
+        reason = (obj.cancellation_reason or "").lower()
+    except Exception:
+        reason = ""
+
+    if obj.status == Booking.Status.CANCELLED_BY_GUEST and reason:
+        # Auto-cancel after 15-minute payment window (system-driven).
+        if "payment window expired" in reason or "payment timeout" in reason:
+            return "Cancelled (payment window expired)"
+
+    return obj.get_status_display()
 
 
 class ListingSummarySerializer(serializers.Serializer):
@@ -73,7 +92,7 @@ class BookingListSerializer(serializers.ModelSerializer):
 
     listing = ListingSummarySerializer(read_only=True)
     guest = GuestSummarySerializer(source="*", read_only=True)
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -92,6 +111,9 @@ class BookingListSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = fields
 
+    def get_status_display(self, obj) -> str:
+        return _get_booking_status_display(obj)
+
 
 class BookingDetailSerializer(serializers.ModelSerializer):
     """Serializer for detailed booking view."""
@@ -99,8 +121,14 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     listing = ListingSummarySerializer(read_only=True)
     guest = GuestSummarySerializer(source="*", read_only=True)
     host = serializers.SerializerMethodField()
-    status_display = serializers.CharField(source="get_status_display", read_only=True)
+    status_display = serializers.SerializerMethodField()
     can_be_cancelled = serializers.BooleanField(read_only=True)
+    payment_retry_disallowed = serializers.BooleanField(read_only=True)
+    payment_deadline_seconds = serializers.SerializerMethodField()
+    refund_amount = serializers.SerializerMethodField()
+    refunded_at = serializers.SerializerMethodField()
+    refund_status = serializers.SerializerMethodField()
+    refund_failed = serializers.SerializerMethodField()
 
     class Meta:
         model = Booking
@@ -121,13 +149,53 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             "status",
             "status_display",
             "can_be_cancelled",
+            "payment_retry_disallowed",
+            "payment_deadline_seconds",
+            "refund_amount",
+            "refunded_at",
+            "refund_status",
+            "refund_failed",
             "special_requests",
             "cancellation_reason",
             "cancelled_at",
             "created_at",
             "updated_at",
         ]
-        read_only_fields = fields
+
+    def get_payment_deadline_seconds(self, obj) -> int:
+        from apps.bookings.services import BookingService
+        return BookingService.get_seconds_until_payment_expiry(obj)
+
+    def get_refund_amount(self, obj):
+        payment = obj.payments.filter(
+            status__in=[Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED]
+        ).first()
+        return float(payment.refund_amount) if payment and payment.refund_amount else None
+
+    def get_refunded_at(self, obj):
+        payment = obj.payments.filter(refunded_at__isnull=False).first()
+        return payment.refunded_at.isoformat() if payment and payment.refunded_at else None
+
+    def get_refund_status(self, obj):
+        payment = obj.payments.filter(
+            status__in=[Payment.Status.REFUNDED, Payment.Status.PARTIALLY_REFUNDED]
+        ).first()
+        return payment.status if payment else None
+
+    def get_refund_failed(self, obj):
+        """True when booking was cancelled, payment was captured, but refund was not processed."""
+        if obj.status not in (Booking.Status.CANCELLED_BY_GUEST, Booking.Status.CANCELLED_BY_HOST):
+            return False
+        payment = obj.payments.filter(
+            status=Payment.Status.COMPLETED,
+            gateway_payment_id__isnull=False,
+        ).exclude(gateway_payment_id="").first()
+        if not payment:
+            return False
+        return payment.refund_amount < payment.amount
+
+    def get_status_display(self, obj) -> str:
+        return _get_booking_status_display(obj)
 
     def get_host(self, obj) -> dict:
         host = obj.listing.host

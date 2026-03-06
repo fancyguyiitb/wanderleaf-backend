@@ -47,7 +47,6 @@ class BookingViewSet(viewsets.ModelViewSet):
         
         GET    /api/v1/bookings/host/               - List bookings for host's listings
         POST   /api/v1/bookings/{uuid}/cancel/      - Cancel with reason
-        POST   /api/v1/bookings/{uuid}/confirm/     - Confirm booking (placeholder)
         
         POST   /api/v1/bookings/check-availability/ - Check listing availability
         POST   /api/v1/bookings/calculate-price/    - Calculate booking price
@@ -143,6 +142,15 @@ class BookingViewSet(viewsets.ModelViewSet):
             )
 
         payment_info = PaymentService.create_payment_intent(booking)
+        if payment_info is None:
+            booking.delete()
+            return Response(
+                {
+                    "detail": "Payment gateway is not available. Please ensure Razorpay is configured (RZP_TEST_KEY_ID, RZP_TEST_KEY_SECRET).",
+                    "code": "payment_gateway_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
 
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
@@ -156,15 +164,17 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
 
     def retrieve(self, request, *args, **kwargs):
-        """Get booking details."""
+        """Get booking details. Auto-cancels expired pending payments."""
         booking = self.get_object()
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
         serializer = BookingDetailSerializer(booking, context={"request": request})
         return Response(serializer.data)
 
     def destroy(self, request, *args, **kwargs):
         """Cancel a booking (DELETE method)."""
         booking = self.get_object()
-        success, message = BookingService.cancel_booking(
+        success, message, refund_code = BookingService.cancel_booking(
             booking=booking,
             cancelled_by=request.user,
             reason="Cancelled by user",
@@ -176,10 +186,10 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        return Response(
-            {"detail": message},
-            status=status.HTTP_200_OK,
-        )
+        payload = {"detail": message}
+        if refund_code:
+            payload["refund_code"] = refund_code
+        return Response(payload, status=status.HTTP_200_OK)
 
     @action(
         detail=False,
@@ -237,7 +247,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         serializer = BookingCancelSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        success, message = BookingService.cancel_booking(
+        success, message, refund_code = BookingService.cancel_booking(
             booking=booking,
             cancelled_by=request.user,
             reason=serializer.validated_data.get("reason", ""),
@@ -252,6 +262,75 @@ class BookingViewSet(viewsets.ModelViewSet):
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
+        payload = {
+            "detail": message,
+            "booking": response_serializer.data,
+        }
+        if refund_code:
+            payload["refund_code"] = refund_code
+        return Response(payload)
+
+    @action(
+        detail=True,
+        methods=["post"],
+        url_path="verify-payment",
+        permission_classes=[permissions.IsAuthenticated],
+    )
+    def verify_payment(self, request, pk=None):
+        """
+        POST /api/v1/bookings/{uuid}/verify-payment/
+        Verify Razorpay payment and confirm booking.
+        Body: { razorpay_order_id, razorpay_payment_id, razorpay_signature }
+        """
+        booking = self.get_object()
+
+        if str(booking.guest_id) != str(request.user.id):
+            return Response(
+                {"detail": "Only the guest can verify payment."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
+            return Response(
+                {
+                    "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",
+                    "code": "payment_window_expired",
+                },
+                status=status.HTTP_410_GONE,
+            )
+
+        razorpay_order_id = request.data.get("razorpay_order_id")
+        razorpay_payment_id = request.data.get("razorpay_payment_id")
+        razorpay_signature = request.data.get("razorpay_signature")
+
+        if not all([razorpay_order_id, razorpay_payment_id, razorpay_signature]):
+            return Response(
+                {"detail": "razorpay_order_id, razorpay_payment_id, and razorpay_signature are required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        success, message = PaymentService.verify_razorpay_payment(
+            booking_id=str(booking.id),
+            razorpay_order_id=razorpay_order_id,
+            razorpay_payment_id=razorpay_payment_id,
+            razorpay_signature=razorpay_signature,
+        )
+
+        if not success:
+            BookingService.mark_payment_retry_disallowed(booking)
+            return Response(
+                {
+                    "detail": message,
+                    "code": "payment_verification_failed",
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        booking.refresh_from_db()
+        response_serializer = BookingDetailSerializer(
+            booking, context={"request": request}
+        )
         return Response({
             "detail": message,
             "booking": response_serializer.data,
@@ -260,38 +339,59 @@ class BookingViewSet(viewsets.ModelViewSet):
     @action(
         detail=True,
         methods=["post"],
-        url_path="confirm",
+        url_path="retry-payment",
         permission_classes=[permissions.IsAuthenticated],
     )
-    def confirm(self, request, pk=None):
+    def retry_payment(self, request, pk=None):
         """
-        POST /api/v1/bookings/{uuid}/confirm/
-        Placeholder endpoint to confirm a booking (simulates successful payment).
-        In production, this would be triggered by a payment webhook.
+        POST /api/v1/bookings/{uuid}/retry-payment/
+        Get a new Razorpay order for a pending booking. Only allowed within 15 minutes
+        and only if payment_retry_disallowed is False (user cancelled / pre-deduction failure).
         """
         booking = self.get_object()
-        
+
         if str(booking.guest_id) != str(request.user.id):
             return Response(
-                {"detail": "Only the guest can confirm payment."},
+                {"detail": "Only the guest can retry payment."},
                 status=status.HTTP_403_FORBIDDEN,
             )
 
-        success, message = BookingService.confirm_booking(booking)
-
-        if not success:
+        if booking.status != Booking.Status.PENDING_PAYMENT:
             return Response(
-                {"detail": message},
+                {"detail": "This booking is not pending payment."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        response_serializer = BookingDetailSerializer(
-            booking, context={"request": request}
-        )
-        return Response({
-            "detail": message,
-            "booking": response_serializer.data,
-        })
+        if booking.payment_retry_disallowed:
+            return Response(
+                {
+                    "detail": "Payment retry is not allowed. Your payment may have been processed. Please contact support with your booking ID if you were charged.",
+                    "code": "payment_retry_disallowed",
+                },
+                status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
+            return Response(
+                {
+                    "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",
+                    "code": "payment_window_expired",
+                },
+                status=status.HTTP_410_GONE,
+            )
+
+        payment_info = PaymentService.create_payment_intent(booking)
+        if payment_info is None:
+            return Response(
+                {
+                    "detail": "Payment gateway is not available.",
+                    "code": "payment_gateway_unavailable",
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        return Response(payment_info)
 
     @action(
         detail=False,
@@ -383,7 +483,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             "service_fee": float(price.service_fee),
             "cleaning_fee": float(price.cleaning_fee),
             "total_price": float(price.total_price),
-            "currency": "USD",
+            "currency": "INR",
         })
 
     @action(

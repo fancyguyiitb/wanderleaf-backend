@@ -30,23 +30,23 @@ LOGIN_ENDPOINT = f"{BASE_URL}/api/v1/auth/login/"
 LISTINGS_ENDPOINT = f"{BASE_URL}/api/v1/listings/"
 BOOKINGS_ENDPOINT = f"{BASE_URL}/api/v1/bookings/"
 
-# Sample users to book as (these should exist from seed_users.py)
+# Indian users to book as (from seed_users.py)
 GUEST_EMAILS = [
-    "amara.okafor@example.com",
-    "liam.chen@example.com",
-    "sofia.rodriguez@example.com",
-    "yuki.tanaka@example.com",
     "priya.sharma@example.com",
-    "marcus.johansson@example.com",
-    "fatima.alrashid@example.com",
-    "oliver.bennett@example.com",
-    "camille.dubois@example.com",
-    "rafael.costa@example.com",
-    "anya.petrov@example.com",
-    "david.kim@example.com",
-    "zara.mbeki@example.com",
-    "elena.vasquez@example.com",
-    "noah.williams@example.com",
+    "arjun.singh@example.com",
+    "riya.kapoor@example.com",
+    "karthik.iyer@example.com",
+    "meenakshi.nair@example.com",
+    "vikram.mehta@example.com",
+    "anjali.gupta@example.com",
+    "sameer.desai@example.com",
+    "pooja.joshi@example.com",
+    "rahul.chatterjee@example.com",
+    "srinivas.reddy@example.com",
+    "aditi.verma@example.com",
+    "rohit.kumar@example.com",
+    "kavitha.rao@example.com",
+    "debashish.patnaik@example.com",
 ]
 
 
@@ -92,6 +92,8 @@ def create_booking(token: str, listing_id: str, check_in: date, check_out: date,
             "Quiet room preferred",
             "Need extra towels",
             "Arriving late, around 10 PM",
+            "Vegetarian meals only",
+            "Prefer Indian breakfast",
         ]),
     }
     resp = requests.post(
@@ -105,15 +107,6 @@ def create_booking(token: str, listing_id: str, check_in: date, check_out: date,
     if resp.status_code == 201:
         return resp.json()
     return None
-
-
-def confirm_booking(token: str, booking_id: str) -> bool:
-    """Confirm a booking (simulate payment success)."""
-    resp = requests.post(
-        f"{BOOKINGS_ENDPOINT}{booking_id}/confirm/",
-        headers={"Authorization": f"Bearer {token}"},
-    )
-    return resp.status_code == 200
 
 
 def generate_booking_dates(listing_index: int, booking_index: int) -> tuple[date, date]:
@@ -202,7 +195,6 @@ def seed():
     print("-" * 60)
     
     created = 0
-    confirmed = 0
     failed = 0
     skipped = 0
     
@@ -247,27 +239,13 @@ def seed():
             
             if result:
                 booking_data = result.get("booking", {})
-                booking_id = booking_data.get("id")
                 total_price = booking_data.get("total_price")
                 
-                # Confirm some bookings (simulate completed payment)
-                # Don't confirm past bookings that would have already happened
-                should_confirm = random.random() > 0.3  # 70% confirmed
-                
-                if should_confirm and booking_id:
-                    if confirm_booking(token, booking_id):
-                        confirmed += 1
-                        status_str = "CONFIRMED"
-                    else:
-                        status_str = "PENDING"
-                else:
-                    status_str = "PENDING"
-                
                 print(
-                    f"  [{listing_idx+1}.{booking_idx+1}] OK: {listing_title[:30]}..."
-                    f"\n       Guest: {guest_email.split('@')[0]}, "
+                    f"  [{listing_idx+1}.{booking_idx+1}] OK: {listing_title[:30]}... "
+                    f"Guest: {guest_email.split('@')[0]}, "
                     f"Dates: {check_in} -> {check_out}, "
-                    f"${total_price} [{status_str}]"
+                    f"₹{total_price} [PENDING]"
                 )
                 created += 1
             else:
@@ -282,11 +260,8 @@ def seed():
     print("SUMMARY")
     print("=" * 60)
     print(f"  Total listings:     {len(listings)}")
-    print(f"  Bookings created:   {created}")
-    print(f"  Bookings confirmed: {confirmed}")
-    print(f"  Bookings pending:   {created - confirmed}")
+    print(f"  Bookings created:   {created} (all pending payment)")
     print(f"  Failed:             {failed}")
-    print(f"  Skipped:            {skipped}")
     print("=" * 60)
 
 

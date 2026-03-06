@@ -45,8 +45,8 @@ class Payment(TimeStampedModel):
     )
     currency = models.CharField(
         max_length=3,
-        default="USD",
-        help_text="Currency code (ISO 4217).",
+        default="INR",
+        help_text="Currency code (ISO 4217). INR for Razorpay.",
     )
 
     status = models.CharField(
@@ -97,6 +97,12 @@ class Payment(TimeStampedModel):
         null=True,
         blank=True,
         help_text="Timestamp when refund was processed.",
+    )
+    gateway_refund_id = models.CharField(
+        max_length=255,
+        blank=True,
+        default="",
+        help_text="Refund ID from payment gateway (e.g. Razorpay rfnd_xxx).",
     )
 
     metadata = models.JSONField(
