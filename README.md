@@ -12,7 +12,6 @@ cloud PostgreSQL provider).
 - **PostgreSQL** (Supabase in production)
 - **JWT auth** (djangorestframework-simplejwt + dj-rest-auth + django-allauth)
 - **Django Channels + Redis** for real-time features (chat, live updates)
-- **Celery + Redis** for async tasks (per-booking payment expiry timer)
 
 ### High-level structure
 
@@ -26,9 +25,14 @@ cloud PostgreSQL provider).
   - `messaging/` – conversations, chat, notifications
   - `common/` – shared utilities, base models, enums
 
-### Running
+### Running (Development)
 
-- Start Redis (required for Celery): `redis-server`
-- Start Celery worker: `celery -A config worker -l info`
-- Start Django: `python run.py` or `python manage.py runserver`
+- `python run.py`
+  - Starts Django dev server
+  - Best-effort auto-starts Redis (only in development) if not already running
+
+### Deployment (Production)
+
+- Run your web server (e.g. `gunicorn config.wsgi:application`)
+- Run Redis as a separate service if you use Channels features
 

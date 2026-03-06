@@ -239,6 +239,9 @@ class BookingService:
         """
         if booking.status != Booking.Status.PENDING_PAYMENT:
             return False
+        # If verification failed, money may have been charged; do not auto-cancel.
+        if getattr(booking, "payment_retry_disallowed", False):
+            return False
         elapsed = (timezone.now() - booking.created_at).total_seconds()
         if elapsed < PAYMENT_WINDOW_SECONDS:
             return False
@@ -255,6 +258,8 @@ class BookingService:
         """Returns seconds remaining for payment, or 0 if expired/inapplicable."""
         if booking.status != Booking.Status.PENDING_PAYMENT:
             return 0
+        if getattr(booking, "payment_retry_disallowed", False):
+            return 0
         elapsed = (timezone.now() - booking.created_at).total_seconds()
         remaining = int(PAYMENT_WINDOW_SECONDS - elapsed)
         return max(0, remaining)
@@ -264,38 +269,6 @@ class BookingService:
         """Call when verify-payment fails (money may have been charged)."""
         booking.payment_retry_disallowed = True
         booking.save(update_fields=["payment_retry_disallowed", "updated_at"])
-
-    @staticmethod
-    def schedule_payment_expiry_timer(booking: Booking) -> bool:
-        """
-        Schedule an async timer to cancel this PENDING_PAYMENT booking after 15 minutes.
-        Returns True if scheduled, False if Celery is unavailable (retrieve() will still cancel on expiry).
-        """
-        from apps.bookings.tasks import cancel_expired_pending_booking
-
-        try:
-            result = cancel_expired_pending_booking.apply_async(
-                args=[str(booking.id)],
-                countdown=PAYMENT_WINDOW_SECONDS,
-            )
-            booking.payment_expiry_task_id = result.id
-            booking.save(update_fields=["payment_expiry_task_id", "updated_at"])
-            return True
-        except Exception:
-            return False
-
-    @staticmethod
-    def cancel_payment_expiry_timer(booking: Booking) -> None:
-        """Revoke the payment expiry timer when booking is confirmed."""
-        task_id = getattr(booking, "payment_expiry_task_id", None) or ""
-        if not task_id:
-            return
-        try:
-            from celery import current_app
-
-            current_app.control.revoke(task_id)
-        except Exception:
-            pass
 
 
 class PaymentService:
@@ -421,10 +394,7 @@ class PaymentService:
         payment.gateway_signature = razorpay_signature
         payment.save(update_fields=["status", "gateway_payment_id", "gateway_signature", "updated_at"])
 
-        BookingService.cancel_payment_expiry_timer(booking)
-
         booking.status = Booking.Status.CONFIRMED
-        booking.payment_expiry_task_id = ""
-        booking.save(update_fields=["status", "payment_expiry_task_id", "updated_at"])
+        booking.save(update_fields=["status", "updated_at"])
 
         return True, "Payment verified. Booking confirmed."

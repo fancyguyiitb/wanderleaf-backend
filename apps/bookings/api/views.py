@@ -152,8 +152,6 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_503_SERVICE_UNAVAILABLE,
             )
 
-        BookingService.schedule_payment_expiry_timer(booking)
-
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
@@ -287,6 +285,16 @@ class BookingViewSet(viewsets.ModelViewSet):
             return Response(
                 {"detail": "Only the guest can verify payment."},
                 status=status.HTTP_403_FORBIDDEN,
+            )
+
+        if BookingService.check_and_cancel_expired(booking):
+            booking.refresh_from_db()
+            return Response(
+                {
+                    "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",
+                    "code": "payment_window_expired",
+                },
+                status=status.HTTP_410_GONE,
             )
 
         razorpay_order_id = request.data.get("razorpay_order_id")
