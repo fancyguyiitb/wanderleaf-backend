@@ -25,6 +25,14 @@ cloud PostgreSQL provider).
   - `messaging/` – conversations, chat, notifications
   - `common/` – shared utilities, base models, enums
 
-This repository currently contains only the **skeleton**; the domain models,
-serializers, views, and business logic will be implemented iteratively.
+### Running (Development)
+
+- `python run.py`
+  - Starts Django dev server
+  - Best-effort auto-starts Redis (only in development) if not already running
+
+### Deployment (Production)
+
+- Run your web server (e.g. `gunicorn config.wsgi:application`)
+- Run Redis as a separate service if you use Channels features
 

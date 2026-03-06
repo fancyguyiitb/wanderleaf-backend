@@ -41,7 +41,7 @@ class Listing(TimeStampedModel):
     price_per_night = models.DecimalField(
         max_digits=10,
         decimal_places=2,
-        help_text="Nightly price in USD.",
+        help_text="Nightly price in INR.",
     )
 
     bedrooms = models.PositiveIntegerField(default=1)

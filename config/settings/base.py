@@ -171,6 +171,9 @@ cloudinary.config(
     secure=True,  # Force HTTPS URLs
 )
 
+# Razorpay (optional; used for booking payments)
+RZP_TEST_KEY_ID = os.getenv("RZP_TEST_KEY_ID")
+RZP_TEST_KEY_SECRET = os.getenv("RZP_TEST_KEY_SECRET")
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
