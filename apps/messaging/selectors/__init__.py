@@ -57,12 +57,14 @@ def get_inbox_conversations_with_unread(user):
         .filter(booking__isnull=False)
         .select_related("booking", "booking__listing", "booking__guest", "booking__listing__host")
     )
-    # Filter to active chat only
+    # Filter to active chat only, and only conversations with at least one message
     result = []
     for conv in convs:
         if not conv.booking or not is_booking_chat_active(conv.booking):
             continue
         last_msg = conv.messages.order_by("-created_at").first()
+        if not last_msg:
+            continue
         last_read = None
         try:
             rs = ConversationReadState.objects.get(user=user, conversation=conv)
