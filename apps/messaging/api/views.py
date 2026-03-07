@@ -9,12 +9,17 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.bookings.models import Booking
-from apps.messaging.selectors import get_conversation_for_user
-from apps.messaging.serializers import ConversationSerializer
+from apps.messaging.selectors import (
+    get_conversation_for_user,
+    get_inbox_conversations_with_unread,
+    get_unread_count_for_user,
+)
+from apps.messaging.serializers import ChatUserSummarySerializer, ConversationSerializer
 from apps.messaging.services import (
     can_access_booking_chat,
     get_or_create_conversation_for_booking,
     is_booking_chat_active,
+    mark_conversation_as_read,
 )
 
 
@@ -58,6 +63,7 @@ class BookingConversationView(APIView):
             .prefetch_related("participants", "messages__sender")
             .get(id=conversation.id)
         )
+        mark_conversation_as_read(request.user, conversation)
         serializer = ConversationSerializer(conversation, context={"request": request})
         return Response(serializer.data)
 
@@ -138,3 +144,54 @@ class ConversationAttachmentUploadView(APIView):
             status=status.HTTP_201_CREATED,
         )
 
+
+class InboxListView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        items = get_inbox_conversations_with_unread(request.user)
+        data = []
+        for item in items:
+            conv = item["conversation"]
+            last_msg = item["last_message"]
+            other = next(
+                (p for p in conv.participants.all() if p.id != request.user.id),
+                None,
+            )
+            if not other:
+                continue
+            booking = conv.booking
+            preview = ""
+            last_at = None
+            if last_msg:
+                last_at = last_msg.created_at
+                if last_msg.body:
+                    preview = (last_msg.body or "")[:200]
+                elif last_msg.message_type == "image":
+                    preview = "Image"
+                else:
+                    preview = last_msg.attachment_name or "File"
+            user_serializer = ChatUserSummarySerializer(
+                other, context={"request": request}
+            )
+            data.append(
+                {
+                    "id": str(conv.id),
+                    "booking_id": str(booking.id),
+                    "booking_title": booking.listing.title,
+                    "is_chat_available": is_booking_chat_active(booking),
+                    "other_participant": user_serializer.data,
+                    "last_message": preview,
+                    "last_message_at": last_at,
+                    "unread_count": item["unread_count"],
+                }
+            )
+        return Response(data)
+
+
+class UnreadCountView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        total = get_unread_count_for_user(request.user)
+        return Response({"total": total})

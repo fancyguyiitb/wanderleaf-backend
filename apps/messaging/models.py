@@ -1,4 +1,5 @@
 from django.db import models
+from django.utils import timezone
 
 from apps.bookings.models import Booking
 from apps.common.models import TimeStampedModel
@@ -62,4 +63,32 @@ class Message(TimeStampedModel):
 
     def __str__(self):
         return f"Message {self.id} in conversation {self.conversation_id}"
+
+
+class ConversationReadState(TimeStampedModel):
+    """
+    Tracks when a user last read messages in a conversation.
+    Used to compute unread counts: messages with created_at > last_read_at
+    from other participants are unread.
+    """
+
+    user = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name="conversation_read_states",
+    )
+    conversation = models.ForeignKey(
+        Conversation,
+        on_delete=models.CASCADE,
+        related_name="read_states",
+    )
+    last_read_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "conversation"],
+                name="unique_user_conversation_read",
+            )
+        ]
 

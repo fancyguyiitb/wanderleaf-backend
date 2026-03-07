@@ -1,5 +1,7 @@
+from django.utils import timezone
+
 from apps.bookings.models import Booking
-from apps.messaging.models import Conversation
+from apps.messaging.models import Conversation, ConversationReadState
 
 
 ACTIVE_BOOKING_CHAT_STATUSES = (
@@ -27,4 +29,13 @@ def get_or_create_conversation_for_booking(booking: Booking) -> Conversation:
     conversation, _ = Conversation.objects.get_or_create(booking=booking)
     conversation.participants.set([booking.guest, booking.listing.host])
     return conversation
+
+
+def mark_conversation_as_read(user, conversation: Conversation) -> None:
+    """Update the user's last_read_at for this conversation to now."""
+    ConversationReadState.objects.update_or_create(
+        user=user,
+        conversation=conversation,
+        defaults={"last_read_at": timezone.now()},
+    )
 
