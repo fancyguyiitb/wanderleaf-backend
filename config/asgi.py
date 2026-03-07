@@ -2,6 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
+from channels.routing import ProtocolTypeRouter
+
+from apps.messaging.middleware import JwtAuthMiddleware
+
 # Load environment variables to check DJANGO_ENV
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -16,6 +20,14 @@ else:
 os.environ.setdefault("DJANGO_SETTINGS_MODULE", settings_module)
 
 from django.core.asgi import get_asgi_application
+from config.routing import websocket_urlpatterns
 
-application = get_asgi_application()
+django_asgi_app = get_asgi_application()
+
+application = ProtocolTypeRouter(
+    {
+        "http": django_asgi_app,
+        "websocket": JwtAuthMiddleware(websocket_urlpatterns),
+    }
+)
 
