@@ -8,6 +8,10 @@ from apps.messaging.serializers import MessageSerializer
 from apps.messaging.services import is_booking_chat_active
 
 
+def _notification_group_name(user_id) -> str:
+    return f"user_{user_id}"
+
+
 class BookingChatConsumer(AsyncJsonWebsocketConsumer):
     async def connect(self):
         user = self.scope.get("user")
@@ -46,8 +50,16 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
 
         await self.channel_layer.group_send(
             self.room_group_name,
-            {"type": "chat.message_created", "message": message_data},
+            {"type": "chat.message_created", "message": message_data["message"]},
         )
+        for recipient_id in message_data["recipient_ids"]:
+            await self.channel_layer.group_send(
+                _notification_group_name(recipient_id),
+                {
+                    "type": "notification.message_created",
+                    "notification": message_data["notification"],
+                },
+            )
 
     async def chat_message_created(self, event):
         await self.send_json(
@@ -108,4 +120,47 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
         conversation.updated_at = timezone.now()
         conversation.save(update_fields=["updated_at"])
 
-        return MessageSerializer(message).data
+        serialized_message = MessageSerializer(message).data
+        recipient_ids = [
+            str(participant.id)
+            for participant in conversation.participants.exclude(id=self.scope["user"].id)
+        ]
+        notification = {
+            "booking_id": str(conversation.booking_id),
+            "conversation_id": str(conversation.id),
+            "booking_title": conversation.booking.listing.title,
+            "message": serialized_message,
+        }
+
+        return {
+            "message": serialized_message,
+            "recipient_ids": recipient_ids,
+            "notification": notification,
+        }
+
+
+class NotificationConsumer(AsyncJsonWebsocketConsumer):
+    async def connect(self):
+        user = self.scope.get("user")
+        if not user or not getattr(user, "is_authenticated", False):
+            await self.close(code=4401)
+            return
+
+        self.user_group_name = _notification_group_name(user.id)
+        await self.channel_layer.group_add(self.user_group_name, self.channel_name)
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        if hasattr(self, "user_group_name"):
+            await self.channel_layer.group_discard(self.user_group_name, self.channel_name)
+
+    async def receive_json(self, content, **kwargs):
+        await self.send_json({"type": "error", "detail": "Notifications socket is read-only."})
+
+    async def notification_message_created(self, event):
+        await self.send_json(
+            {
+                "type": "notification.message_created",
+                "notification": event["notification"],
+            }
+        )
