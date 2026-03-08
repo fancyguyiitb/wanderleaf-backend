@@ -1,7 +1,8 @@
 from django.urls import path
 
+from apps.reviews.api.views import ReviewListCreateView
 
-urlpatterns: list = [
-    # review endpoints will be added here
+urlpatterns = [
+    path("", ReviewListCreateView.as_view(), name="review-list-create"),
 ]
 
