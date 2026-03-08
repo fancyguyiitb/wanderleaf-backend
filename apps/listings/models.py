@@ -80,6 +80,17 @@ class Listing(TimeStampedModel):
         help_text="Soft-delete / visibility toggle.",
     )
 
+    average_rating = models.DecimalField(
+        max_digits=3,
+        decimal_places=1,
+        default=0,
+        help_text="Cached average of all review ratings. Updated when reviews are added/removed.",
+    )
+    review_count = models.PositiveIntegerField(
+        default=0,
+        help_text="Cached total number of reviews. Updated when reviews are added/removed.",
+    )
+
     class Meta:
         ordering = ["-created_at"]
 

@@ -42,6 +42,12 @@ class ListingListSerializer(serializers.ModelSerializer):
     """
 
     host = HostSummarySerializer(source="*", read_only=True)
+    rating = serializers.DecimalField(
+        source="average_rating",
+        max_digits=3,
+        decimal_places=1,
+        read_only=True,
+    )
 
     class Meta:
         model = Listing
@@ -60,6 +66,8 @@ class ListingListSerializer(serializers.ModelSerializer):
             "longitude",
             "is_active",
             "host",
+            "rating",
+            "review_count",
             "created_at",
             "updated_at",
         ]
@@ -77,8 +85,13 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     booked_dates = serializers.SerializerMethodField()
     service_fee_percent = serializers.SerializerMethodField()
     cleaning_fee = serializers.SerializerMethodField()
-    rating = serializers.SerializerMethodField()
-    review_count = serializers.SerializerMethodField()
+    rating = serializers.DecimalField(
+        source="average_rating",
+        max_digits=3,
+        decimal_places=1,
+        read_only=True,
+    )
+    review_count = serializers.IntegerField(read_only=True)
     rating_breakdown = serializers.SerializerMethodField()
 
     class Meta:
@@ -131,16 +144,6 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     def get_cleaning_fee(self, obj) -> float:
         """Default cleaning fee for frontend price calculation."""
         return float(CLEANING_FEE_DEFAULT)
-
-    def get_rating(self, obj) -> float:
-        """Average rating from all reviews (1–5)."""
-        agg = Review.objects.filter(listing=obj).aggregate(avg=Avg("rating"))
-        avg_val = agg["avg"]
-        return round(float(avg_val), 1) if avg_val is not None else 0
-
-    def get_review_count(self, obj) -> int:
-        """Total number of reviews."""
-        return Review.objects.filter(listing=obj).count()
 
     def get_rating_breakdown(self, obj) -> list[dict]:
         """Count and percentage for each star rating (5 down to 1)."""
