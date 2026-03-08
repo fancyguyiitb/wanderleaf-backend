@@ -4,6 +4,7 @@ from apps.messaging.api.views import (
     BookingConversationView,
     ConversationAttachmentUploadView,
     InboxListView,
+    MarkConversationReadView,
     UnreadCountView,
 )
 
@@ -19,6 +20,11 @@ urlpatterns = [
         "conversations/<uuid:conversation_id>/attachments/",
         ConversationAttachmentUploadView.as_view(),
         name="conversation-attachments",
+    ),
+    path(
+        "conversations/<uuid:conversation_id>/mark-read/",
+        MarkConversationReadView.as_view(),
+        name="conversation-mark-read",
     ),
 ]
 

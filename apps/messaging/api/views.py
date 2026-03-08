@@ -145,6 +145,25 @@ class ConversationAttachmentUploadView(APIView):
         )
 
 
+class MarkConversationReadView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, conversation_id: str):
+        conversation = get_conversation_for_user(conversation_id, request.user)
+        if not conversation or not conversation.booking:
+            return Response(
+                {"detail": "Conversation not found."},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        if not is_booking_chat_active(conversation.booking):
+            return Response(
+                {"detail": "Chat is unavailable for this booking."},
+                status=status.HTTP_403_FORBIDDEN,
+            )
+        mark_conversation_as_read(request.user, conversation)
+        return Response({"detail": "ok"})
+
+
 class InboxListView(APIView):
     permission_classes = [permissions.IsAuthenticated]
 
