@@ -125,6 +125,8 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     can_be_cancelled = serializers.BooleanField(read_only=True)
     payment_retry_disallowed = serializers.BooleanField(read_only=True)
     payment_deadline_seconds = serializers.SerializerMethodField()
+    can_write_review = serializers.SerializerMethodField()
+    existing_review_id = serializers.SerializerMethodField()
     refund_amount = serializers.SerializerMethodField()
     refunded_at = serializers.SerializerMethodField()
     refund_status = serializers.SerializerMethodField()
@@ -151,6 +153,8 @@ class BookingDetailSerializer(serializers.ModelSerializer):
             "can_be_cancelled",
             "payment_retry_disallowed",
             "payment_deadline_seconds",
+            "can_write_review",
+            "existing_review_id",
             "refund_amount",
             "refunded_at",
             "refund_status",
@@ -200,6 +204,30 @@ class BookingDetailSerializer(serializers.ModelSerializer):
     def get_host(self, obj) -> dict:
         host = obj.listing.host
         return HostSummarySerializer(host, context=self.context).data
+
+    def get_can_write_review(self, obj) -> bool:
+        """True if current user (guest) can write a review for this stay."""
+        from django.core.exceptions import ObjectDoesNotExist
+        request = self.context.get("request")
+        if not request or not request.user.is_authenticated:
+            return False
+        if str(obj.guest_id) != str(request.user.id):
+            return False
+        if obj.status not in (Booking.Status.CONFIRMED, Booking.Status.COMPLETED):
+            return False
+        try:
+            obj.review
+            return False  # already has review
+        except ObjectDoesNotExist:
+            return True
+
+    def get_existing_review_id(self, obj) -> str | None:
+        """Review ID if guest has already reviewed this stay, else None."""
+        from django.core.exceptions import ObjectDoesNotExist
+        try:
+            return str(obj.review.id)
+        except ObjectDoesNotExist:
+            return None
 
 
 class BookingCreateSerializer(serializers.Serializer):

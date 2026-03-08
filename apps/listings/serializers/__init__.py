@@ -1,7 +1,9 @@
+from django.db.models import Avg, Count
 from rest_framework import serializers
 
 from apps.bookings.services import BookingService
 from apps.listings.models import Listing
+from apps.reviews.models import Review
 from apps.users.serializers import UserSerializer
 
 # Fee constants exposed for frontend price calculation (must match BookingService)
@@ -75,6 +77,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     booked_dates = serializers.SerializerMethodField()
     service_fee_percent = serializers.SerializerMethodField()
     cleaning_fee = serializers.SerializerMethodField()
+    rating = serializers.SerializerMethodField()
+    review_count = serializers.SerializerMethodField()
+    rating_breakdown = serializers.SerializerMethodField()
 
     class Meta:
         model = Listing
@@ -97,6 +102,9 @@ class ListingDetailSerializer(serializers.ModelSerializer):
             "booked_dates",
             "service_fee_percent",
             "cleaning_fee",
+            "rating",
+            "review_count",
+            "rating_breakdown",
             "created_at",
             "updated_at",
         ]
@@ -123,6 +131,39 @@ class ListingDetailSerializer(serializers.ModelSerializer):
     def get_cleaning_fee(self, obj) -> float:
         """Default cleaning fee for frontend price calculation."""
         return float(CLEANING_FEE_DEFAULT)
+
+    def get_rating(self, obj) -> float:
+        """Average rating from all reviews (1–5)."""
+        agg = Review.objects.filter(listing=obj).aggregate(avg=Avg("rating"))
+        avg_val = agg["avg"]
+        return round(float(avg_val), 1) if avg_val is not None else 0
+
+    def get_review_count(self, obj) -> int:
+        """Total number of reviews."""
+        return Review.objects.filter(listing=obj).count()
+
+    def get_rating_breakdown(self, obj) -> list[dict]:
+        """Count and percentage for each star rating (5 down to 1)."""
+        counts = (
+            Review.objects.filter(listing=obj)
+            .values("rating")
+            .annotate(count=Count("id"))
+        )
+        by_star = {r["rating"]: r["count"] for r in counts}
+        total = sum(by_star.values())
+        if total == 0:
+            return [
+                {"stars": s, "count": 0, "percentage": 0}
+                for s in range(5, 0, -1)
+            ]
+        return [
+            {
+                "stars": s,
+                "count": by_star.get(s, 0),
+                "percentage": round(100 * by_star.get(s, 0) / total),
+            }
+            for s in range(5, 0, -1)
+        ]
 
 
 class ListingCreateUpdateSerializer(serializers.ModelSerializer):
