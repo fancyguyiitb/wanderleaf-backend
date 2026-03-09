@@ -101,3 +101,6 @@ yarn-error.log*
 
 # Docker
 *.pid
+
+#test and seed scripts
+test_and_seed_scripts/

@@ -1,0 +1,21 @@
+<html>
+<body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
+  <p>Hi {{ recipient.username }},</p>
+
+  {% if recipient_role == "guest" %}
+  <p>Your payment was successful and your booking for <strong>{{ listing.title }}</strong> is now confirmed.</p>
+  {% else %}
+  <p>Payment has been received for your listing <strong>{{ listing.title }}</strong> and the booking is now confirmed.</p>
+  {% endif %}
+
+  <p>
+    <strong>Booking ID:</strong> {{ booking.id }}<br>
+    <strong>Check-in:</strong> {{ booking.check_in }}<br>
+    <strong>Check-out:</strong> {{ booking.check_out }}<br>
+    <strong>Guests:</strong> {{ booking.num_guests }}<br>
+    <strong>Total paid:</strong> INR {{ booking.total_price }}
+  </p>
+
+  <p>Thanks,<br>{{ site_name }}</p>
+</body>
+</html>

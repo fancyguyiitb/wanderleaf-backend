@@ -1,0 +1,22 @@
+{% if recipient_role == "guest" %}Hi {{ recipient.username }},{% else %}Hi {{ recipient.username }},{% endif %}
+
+{% if recipient_role == "guest" %}
+Your booking request for {{ listing.title }} has been created and is currently pending payment.
+{% else %}
+A new booking request has been created for your listing {{ listing.title }} and is currently pending payment.
+{% endif %}
+
+Booking ID: {{ booking.id }}
+Check-in: {{ booking.check_in }}
+Check-out: {{ booking.check_out }}
+Guests: {{ booking.num_guests }}
+Total price: INR {{ booking.total_price }}
+
+{% if recipient_role == "guest" %}
+Complete your payment within 15 minutes to confirm the booking.
+{% else %}
+You will receive another update once the guest completes payment.
+{% endif %}
+
+Thanks,
+{{ site_name }}
