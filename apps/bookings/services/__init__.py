@@ -1,11 +1,12 @@
 import os
+import time
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
 
 from django.conf import settings
-from django.db import transaction
+from django.db import DatabaseError, IntegrityError, OperationalError, connection, transaction
 from django.db.models import Q
 from django.utils import timezone
 
@@ -36,6 +37,8 @@ class BookingService:
     """Service class for booking-related business logic."""
 
     BOOKING_DATES_OVERLAP_CODE = "booking_dates_overlap"
+    OVERLAP_CONSTRAINT_NAME = "bookings_active_booking_no_overlap"
+    MAX_CREATE_RETRIES = 2
 
     @staticmethod
     def check_availability(
@@ -102,6 +105,99 @@ class BookingService:
         }
 
     @staticmethod
+    def supports_row_level_booking_lock() -> bool:
+        """Whether the current DB backend supports row-level select_for_update locks."""
+        return bool(connection.features.has_select_for_update)
+
+    @staticmethod
+    def supports_native_booking_overlap_guard() -> bool:
+        """Whether the current DB backend can enforce overlap guards natively."""
+        return connection.vendor == "postgresql"
+
+    @staticmethod
+    def lock_listing_for_booking(listing: Listing) -> Listing:
+        """Acquire the strongest available lock before checking availability."""
+        queryset = Listing.objects
+        if BookingService.supports_row_level_booking_lock():
+            queryset = queryset.select_for_update()
+        return queryset.get(pk=listing.pk)
+
+    @staticmethod
+    def get_database_error_code(exc: BaseException) -> str | None:
+        """Extract backend-specific DB error codes when available."""
+        for candidate in (exc, getattr(exc, "__cause__", None), getattr(exc, "__context__", None)):
+            if candidate is None:
+                continue
+            code = getattr(candidate, "pgcode", None)
+            if code:
+                return str(code)
+        return None
+
+    @staticmethod
+    def is_overlap_constraint_error(exc: IntegrityError) -> bool:
+        """Check whether an IntegrityError came from the overlap guard constraint."""
+        candidates = [str(exc)]
+        for candidate in (getattr(exc, "__cause__", None), getattr(exc, "__context__", None)):
+            if candidate is None:
+                continue
+            candidates.append(str(candidate))
+            diag = getattr(candidate, "diag", None)
+            constraint_name = getattr(diag, "constraint_name", None)
+            if constraint_name == BookingService.OVERLAP_CONSTRAINT_NAME:
+                return True
+
+        return any(
+            BookingService.OVERLAP_CONSTRAINT_NAME in candidate
+            for candidate in candidates
+        )
+
+    @staticmethod
+    def is_retryable_create_error(exc: DatabaseError) -> bool:
+        """Retry once for transient DB contention errors."""
+        code = BookingService.get_database_error_code(exc)
+        if code in {"40001", "40P01"}:
+            return True
+
+        return "database is locked" in str(exc).lower()
+
+    @staticmethod
+    def create_booking_records(
+        listing: Listing,
+        guest: User,
+        check_in: date,
+        check_out: date,
+        num_guests: int,
+        special_requests: str,
+        price: PriceBreakdown,
+    ) -> Booking:
+        """Persist the booking row and the initial pending payment row."""
+        booking = Booking.objects.create(
+            listing=listing,
+            guest=guest,
+            check_in=check_in,
+            check_out=check_out,
+            num_guests=num_guests,
+            price_per_night=price.price_per_night,
+            num_nights=price.num_nights,
+            subtotal=price.subtotal,
+            service_fee=price.service_fee,
+            cleaning_fee=price.cleaning_fee,
+            total_price=price.total_price,
+            status=Booking.Status.PENDING_PAYMENT,
+            special_requests=special_requests,
+        )
+
+        Payment.objects.create(
+            booking=booking,
+            amount=price.total_price,
+            currency="INR",
+            status=Payment.Status.PENDING,
+            payment_method=Payment.PaymentMethod.CARD,
+        )
+
+        return booking
+
+    @staticmethod
     def get_booked_dates(listing_id: str) -> list[dict]:
         """
         Get all booked date ranges for a listing.
@@ -146,7 +242,6 @@ class BookingService:
         )
 
     @staticmethod
-    @transaction.atomic
     def create_booking(
         listing: Listing,
         guest: User,
@@ -161,52 +256,82 @@ class BookingService:
         Returns:
             Tuple of (booking, error_message)
         """
-        # Lock the listing row when the database supports it so concurrent
-        # booking attempts for the same property are serialized.
-        listing = Listing.objects.select_for_update().get(pk=listing.pk)
+        for attempt in range(BookingService.MAX_CREATE_RETRIES):
+            try:
+                with transaction.atomic():
+                    # SQLite fallback keeps the service-level guard only; Postgres
+                    # adds real row locks plus an exclusion constraint.
+                    locked_listing = BookingService.lock_listing_for_booking(listing)
 
-        is_available, conflicts = BookingService.check_availability(
-            listing_id=str(listing.id),
-            check_in=check_in,
-            check_out=check_out,
-        )
+                    is_available, conflicts = BookingService.check_availability(
+                        listing_id=str(locked_listing.id),
+                        check_in=check_in,
+                        check_out=check_out,
+                    )
 
-        if not is_available:
-            return None, BookingService.build_overlap_error(conflicts)
+                    if not is_available:
+                        return None, BookingService.build_overlap_error(conflicts)
 
-        if num_guests > listing.max_guests:
-            return None, f"This listing allows a maximum of {listing.max_guests} guests."
+                    if num_guests > locked_listing.max_guests:
+                        return None, (
+                            f"This listing allows a maximum of {locked_listing.max_guests} guests."
+                        )
 
-        if str(listing.host_id) == str(guest.id):
-            return None, "You cannot book your own listing."
+                    if str(locked_listing.host_id) == str(guest.id):
+                        return None, "You cannot book your own listing."
 
-        price = BookingService.calculate_price(listing, check_in, check_out)
+                    price = BookingService.calculate_price(
+                        locked_listing,
+                        check_in,
+                        check_out,
+                    )
+                    booking = BookingService.create_booking_records(
+                        listing=locked_listing,
+                        guest=guest,
+                        check_in=check_in,
+                        check_out=check_out,
+                        num_guests=num_guests,
+                        special_requests=special_requests,
+                        price=price,
+                    )
+                    return booking, None
+            except IntegrityError as exc:
+                if BookingService.is_overlap_constraint_error(exc):
+                    is_available, conflicts = BookingService.check_availability(
+                        listing_id=str(listing.id),
+                        check_in=check_in,
+                        check_out=check_out,
+                    )
+                    if not is_available:
+                        return None, BookingService.build_overlap_error(conflicts)
+                    return None, {
+                        "detail": (
+                            "Selected dates are no longer available. "
+                            "Please choose different dates."
+                        ),
+                        "code": BookingService.BOOKING_DATES_OVERLAP_CODE,
+                        "conflicts_count": 0,
+                        "conflicts": [],
+                    }
+                raise
+            except OperationalError as exc:
+                if (
+                    BookingService.is_retryable_create_error(exc)
+                    and attempt < BookingService.MAX_CREATE_RETRIES - 1
+                ):
+                    time.sleep(0.05 * (attempt + 1))
+                    continue
+                raise
 
-        booking = Booking.objects.create(
-            listing=listing,
-            guest=guest,
-            check_in=check_in,
-            check_out=check_out,
-            num_guests=num_guests,
-            price_per_night=price.price_per_night,
-            num_nights=price.num_nights,
-            subtotal=price.subtotal,
-            service_fee=price.service_fee,
-            cleaning_fee=price.cleaning_fee,
-            total_price=price.total_price,
-            status=Booking.Status.PENDING_PAYMENT,
-            special_requests=special_requests,
-        )
-
-        Payment.objects.create(
-            booking=booking,
-            amount=price.total_price,
-            currency="INR",
-            status=Payment.Status.PENDING,
-            payment_method=Payment.PaymentMethod.CARD,
-        )
-
-        return booking, None
+        return None, {
+            "detail": (
+                "Booking could not be completed because availability changed. "
+                "Please try again."
+            ),
+            "code": BookingService.BOOKING_DATES_OVERLAP_CODE,
+            "conflicts_count": 0,
+            "conflicts": [],
+        }
 
     @staticmethod
     @transaction.atomic

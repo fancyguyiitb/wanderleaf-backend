@@ -91,7 +91,9 @@ if DATABASE_URL:
         "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True),
     }
 else:
-    # Local development fallback (SQLite)
+    # Local development fallback (SQLite). This is weaker than Postgres for
+    # bookings because select_for_update row locks and exclusion constraints
+    # are not available here.
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
