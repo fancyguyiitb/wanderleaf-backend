@@ -35,6 +35,8 @@ class PriceBreakdown:
 class BookingService:
     """Service class for booking-related business logic."""
 
+    BOOKING_DATES_OVERLAP_CODE = "booking_dates_overlap"
+
     @staticmethod
     def check_availability(
         listing_id: str,
@@ -71,6 +73,33 @@ class BookingService:
 
         is_available = len(conflicting_bookings) == 0
         return is_available, conflicting_bookings
+
+    @staticmethod
+    def serialize_conflicts(conflicts: list[dict]) -> list[dict[str, str]]:
+        """Normalize conflicting booking ranges for API responses."""
+        return [
+            {
+                "id": str(conflict["id"]),
+                "check_in": conflict["check_in"].isoformat(),
+                "check_out": conflict["check_out"].isoformat(),
+                "status": str(conflict["status"]),
+            }
+            for conflict in conflicts
+        ]
+
+    @staticmethod
+    def build_overlap_error(conflicts: list[dict]) -> dict[str, object]:
+        """Build a consistent overlap error payload for API clients."""
+        serialized_conflicts = BookingService.serialize_conflicts(conflicts)
+        return {
+            "detail": (
+                "Selected dates overlap with an existing booking. "
+                "Please choose different dates."
+            ),
+            "code": BookingService.BOOKING_DATES_OVERLAP_CODE,
+            "conflicts_count": len(serialized_conflicts),
+            "conflicts": serialized_conflicts,
+        }
 
     @staticmethod
     def get_booked_dates(listing_id: str) -> list[dict]:
@@ -125,13 +154,17 @@ class BookingService:
         check_out: date,
         num_guests: int,
         special_requests: str = "",
-    ) -> tuple[Booking, Optional[str]]:
+    ) -> tuple[Booking | None, str | dict[str, object] | None]:
         """
         Create a new booking with all validations.
         
         Returns:
             Tuple of (booking, error_message)
         """
+        # Lock the listing row when the database supports it so concurrent
+        # booking attempts for the same property are serialized.
+        listing = Listing.objects.select_for_update().get(pk=listing.pk)
+
         is_available, conflicts = BookingService.check_availability(
             listing_id=str(listing.id),
             check_in=check_in,
@@ -139,7 +172,7 @@ class BookingService:
         )
 
         if not is_available:
-            return None, "The listing is not available for the selected dates."
+            return None, BookingService.build_overlap_error(conflicts)
 
         if num_guests > listing.max_guests:
             return None, f"This listing allows a maximum of {listing.max_guests} guests."

@@ -137,9 +137,15 @@ class BookingViewSet(viewsets.ModelViewSet):
         )
 
         if error:
+            payload = error if isinstance(error, dict) else {"detail": error}
+            response_status = (
+                status.HTTP_409_CONFLICT
+                if payload.get("code") == BookingService.BOOKING_DATES_OVERLAP_CODE
+                else status.HTTP_400_BAD_REQUEST
+            )
             return Response(
-                {"detail": error},
-                status=status.HTTP_400_BAD_REQUEST,
+                payload,
+                status=response_status,
             )
 
         payment_info = PaymentService.create_payment_intent(booking)
@@ -455,6 +461,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             "check_in": data["check_in"],
             "check_out": data["check_out"],
             "conflicts_count": len(conflicts),
+            "conflicts": BookingService.serialize_conflicts(conflicts),
         })
 
     @action(
