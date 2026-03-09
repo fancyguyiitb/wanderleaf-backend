@@ -63,6 +63,8 @@ class NotificationEmailService:
         recipient_roles: Iterable[str],
         extra_context: dict | None = None,
     ) -> None:
+        if not getattr(settings, "EMAIL_NOTIFICATIONS_ENABLED", True):
+            return
         if not cls._email_backend_is_available():
             logger.info("Skipping %s email because email is not configured.", event_name)
             return

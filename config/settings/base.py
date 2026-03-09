@@ -177,6 +177,7 @@ RZP_TEST_KEY_ID = os.getenv("RZP_TEST_KEY_ID")
 RZP_TEST_KEY_SECRET = os.getenv("RZP_TEST_KEY_SECRET")
 
 # Email (optional; notifications are skipped when SMTP is selected without a host)
+EMAIL_NOTIFICATIONS_ENABLED = os.getenv("EMAIL_NOTIFICATIONS_ENABLED", "true").lower() in ("true", "1", "yes")
 EMAIL_BACKEND = os.getenv(
     "EMAIL_BACKEND",
     "django.core.mail.backends.smtp.EmailBackend",
