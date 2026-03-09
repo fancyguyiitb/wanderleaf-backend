@@ -1,0 +1,16 @@
+Hi {{ recipient.username }},
+
+{% if recipient_role == "guest" %}
+Your payment was successful and your booking for {{ listing.title }} is now confirmed.
+{% else %}
+Payment has been received for your listing {{ listing.title }} and the booking is now confirmed.
+{% endif %}
+
+Booking ID: {{ booking.id }}
+Check-in: {{ booking.check_in }}
+Check-out: {{ booking.check_out }}
+Guests: {{ booking.num_guests }}
+Total paid: INR {{ booking.total_price }}
+
+Thanks,
+{{ site_name }}

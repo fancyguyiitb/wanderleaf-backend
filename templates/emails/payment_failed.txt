@@ -1,0 +1,14 @@
+Hi {{ recipient.username }},
+
+We could not complete your payment update for {{ listing.title }}.
+
+Booking ID: {{ booking.id }}
+Check-in: {{ booking.check_in }}
+Check-out: {{ booking.check_out }}
+
+{{ failure_message }}
+
+If you need help, contact {{ support_email }}.
+
+Thanks,
+{{ site_name }}

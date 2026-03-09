@@ -1,0 +1,27 @@
+<html>
+<body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
+  <p>Hi {{ recipient.username }},</p>
+
+  {% if recipient_role == "guest" %}
+  <p>Your booking request for <strong>{{ listing.title }}</strong> has been created and is currently pending payment.</p>
+  {% else %}
+  <p>A new booking request has been created for your listing <strong>{{ listing.title }}</strong> and is currently pending payment.</p>
+  {% endif %}
+
+  <p>
+    <strong>Booking ID:</strong> {{ booking.id }}<br>
+    <strong>Check-in:</strong> {{ booking.check_in }}<br>
+    <strong>Check-out:</strong> {{ booking.check_out }}<br>
+    <strong>Guests:</strong> {{ booking.num_guests }}<br>
+    <strong>Total price:</strong> INR {{ booking.total_price }}
+  </p>
+
+  {% if recipient_role == "guest" %}
+  <p>Complete your payment within 15 minutes to confirm the booking.</p>
+  {% else %}
+  <p>You will receive another update once the guest completes payment.</p>
+  {% endif %}
+
+  <p>Thanks,<br>{{ site_name }}</p>
+</body>
+</html>

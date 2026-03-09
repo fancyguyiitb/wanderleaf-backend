@@ -1,0 +1,22 @@
+Hi {{ recipient.username }},
+
+{% if recipient_role == "guest" %}
+Your booking for {{ listing.title }} has been cancelled.
+{% else %}
+The booking for your listing {{ listing.title }} has been cancelled.
+{% endif %}
+
+Booking ID: {{ booking.id }}
+Cancelled by: {{ cancelled_by_role|default:"system" }}
+Check-in: {{ booking.check_in }}
+Check-out: {{ booking.check_out }}
+Status: {{ booking.get_status_display }}
+
+{% if refund_message %}
+{{ refund_message }}
+{% endif %}
+
+If you need help, contact {{ support_email }}.
+
+Thanks,
+{{ site_name }}

@@ -18,6 +18,7 @@ from apps.bookings.serializers import (
     PriceCalculationSerializer,
 )
 from apps.bookings.services import BookingService, PaymentService
+from apps.common.email_service import NotificationEmailService
 from apps.listings.models import Listing
 
 
@@ -155,6 +156,7 @@ class BookingViewSet(viewsets.ModelViewSet):
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
+        NotificationEmailService.send_booking_created(booking)
         return Response(
             {
                 "booking": response_serializer.data,
@@ -168,6 +170,10 @@ class BookingViewSet(viewsets.ModelViewSet):
         booking = self.get_object()
         if BookingService.check_and_cancel_expired(booking):
             booking.refresh_from_db()
+            NotificationEmailService.send_payment_failed(
+                booking,
+                reason="expired",
+            )
         serializer = BookingDetailSerializer(booking, context={"request": request})
         return Response(serializer.data)
 
@@ -189,6 +195,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         payload = {"detail": message}
         if refund_code:
             payload["refund_code"] = refund_code
+        NotificationEmailService.send_booking_cancelled(
+            booking=booking,
+            cancelled_by=request.user,
+            refund_code=refund_code,
+        )
         return Response(payload, status=status.HTTP_200_OK)
 
     @action(
@@ -268,6 +279,11 @@ class BookingViewSet(viewsets.ModelViewSet):
         }
         if refund_code:
             payload["refund_code"] = refund_code
+        NotificationEmailService.send_booking_cancelled(
+            booking=booking,
+            cancelled_by=request.user,
+            refund_code=refund_code,
+        )
         return Response(payload)
 
     @action(
@@ -292,6 +308,10 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         if BookingService.check_and_cancel_expired(booking):
             booking.refresh_from_db()
+            NotificationEmailService.send_payment_failed(
+                booking,
+                reason="expired",
+            )
             return Response(
                 {
                     "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",
@@ -319,6 +339,10 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         if not success:
             BookingService.mark_payment_retry_disallowed(booking)
+            NotificationEmailService.send_payment_failed(
+                booking,
+                reason="verification_failed",
+            )
             return Response(
                 {
                     "detail": message,
@@ -328,6 +352,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             )
 
         booking.refresh_from_db()
+        NotificationEmailService.send_payment_success(booking)
         response_serializer = BookingDetailSerializer(
             booking, context={"request": request}
         )
@@ -373,6 +398,10 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         if BookingService.check_and_cancel_expired(booking):
             booking.refresh_from_db()
+            NotificationEmailService.send_payment_failed(
+                booking,
+                reason="expired",
+            )
             return Response(
                 {
                     "detail": "Payment window expired (15 minutes). The booking has been cancelled and dates freed.",

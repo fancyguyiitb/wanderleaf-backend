@@ -1,0 +1,27 @@
+<html>
+<body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
+  <p>Hi {{ recipient.username }},</p>
+
+  {% if recipient_role == "guest" %}
+  <p>Your booking for <strong>{{ listing.title }}</strong> has been cancelled.</p>
+  {% else %}
+  <p>The booking for your listing <strong>{{ listing.title }}</strong> has been cancelled.</p>
+  {% endif %}
+
+  <p>
+    <strong>Booking ID:</strong> {{ booking.id }}<br>
+    <strong>Cancelled by:</strong> {{ cancelled_by_role|default:"system" }}<br>
+    <strong>Check-in:</strong> {{ booking.check_in }}<br>
+    <strong>Check-out:</strong> {{ booking.check_out }}<br>
+    <strong>Status:</strong> {{ booking.get_status_display }}
+  </p>
+
+  {% if refund_message %}
+  <p>{{ refund_message }}</p>
+  {% endif %}
+
+  <p>If you need help, contact {{ support_email }}.</p>
+
+  <p>Thanks,<br>{{ site_name }}</p>
+</body>
+</html>

@@ -1,0 +1,19 @@
+<html>
+<body style="font-family: Arial, sans-serif; color: #1f2937; line-height: 1.6;">
+  <p>Hi {{ recipient.username }},</p>
+
+  <p>We could not complete your payment update for <strong>{{ listing.title }}</strong>.</p>
+
+  <p>
+    <strong>Booking ID:</strong> {{ booking.id }}<br>
+    <strong>Check-in:</strong> {{ booking.check_in }}<br>
+    <strong>Check-out:</strong> {{ booking.check_out }}
+  </p>
+
+  <p>{{ failure_message }}</p>
+
+  <p>If you need help, contact {{ support_email }}.</p>
+
+  <p>Thanks,<br>{{ site_name }}</p>
+</body>
+</html>
