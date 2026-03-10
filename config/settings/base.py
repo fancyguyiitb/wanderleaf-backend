@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 
@@ -197,6 +198,10 @@ AUTH_USER_MODEL = "users.User"
 
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "idempotency-key",
+]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

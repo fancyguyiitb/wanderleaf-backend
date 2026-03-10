@@ -39,6 +39,12 @@ class BookingService:
     BOOKING_DATES_OVERLAP_CODE = "booking_dates_overlap"
     OVERLAP_CONSTRAINT_NAME = "bookings_active_booking_no_overlap"
     MAX_CREATE_RETRIES = 2
+    DEFAULT_IDEMPOTENCY_CONFLICT_ERROR = {
+        "detail": "Booking could not be completed because availability changed. Please try again.",
+        "code": BOOKING_DATES_OVERLAP_CODE,
+        "conflicts_count": 0,
+        "conflicts": [],
+    }
 
     @staticmethod
     def check_availability(
@@ -169,6 +175,7 @@ class BookingService:
         num_guests: int,
         special_requests: str,
         price: PriceBreakdown,
+        create_idempotency_key: str | None = None,
     ) -> Booking:
         """Persist the booking row and the initial pending payment row."""
         booking = Booking.objects.create(
@@ -185,6 +192,7 @@ class BookingService:
             total_price=price.total_price,
             status=Booking.Status.PENDING_PAYMENT,
             special_requests=special_requests,
+            create_idempotency_key=create_idempotency_key,
         )
 
         Payment.objects.create(
@@ -196,6 +204,21 @@ class BookingService:
         )
 
         return booking
+
+    @staticmethod
+    def get_existing_booking_for_idempotency_key(
+        guest: User,
+        idempotency_key: str | None,
+    ) -> Booking | None:
+        """Return a previously created booking for the same idempotency key."""
+        if not idempotency_key:
+            return None
+        return (
+            Booking.objects
+            .select_related("listing", "guest", "listing__host")
+            .filter(guest=guest, create_idempotency_key=idempotency_key)
+            .first()
+        )
 
     @staticmethod
     def get_booked_dates(listing_id: str) -> list[dict]:
@@ -249,6 +272,7 @@ class BookingService:
         check_out: date,
         num_guests: int,
         special_requests: str = "",
+        create_idempotency_key: str | None = None,
     ) -> tuple[Booking | None, str | dict[str, object] | None]:
         """
         Create a new booking with all validations.
@@ -259,6 +283,13 @@ class BookingService:
         for attempt in range(BookingService.MAX_CREATE_RETRIES):
             try:
                 with transaction.atomic():
+                    existing_booking = BookingService.get_existing_booking_for_idempotency_key(
+                        guest=guest,
+                        idempotency_key=create_idempotency_key,
+                    )
+                    if existing_booking:
+                        return existing_booking, None
+
                     # SQLite fallback keeps the service-level guard only; Postgres
                     # adds real row locks plus an exclusion constraint.
                     locked_listing = BookingService.lock_listing_for_booking(listing)
@@ -293,9 +324,17 @@ class BookingService:
                         num_guests=num_guests,
                         special_requests=special_requests,
                         price=price,
+                        create_idempotency_key=create_idempotency_key,
                     )
                     return booking, None
             except IntegrityError as exc:
+                if create_idempotency_key:
+                    existing_booking = BookingService.get_existing_booking_for_idempotency_key(
+                        guest=guest,
+                        idempotency_key=create_idempotency_key,
+                    )
+                    if existing_booking:
+                        return existing_booking, None
                 if BookingService.is_overlap_constraint_error(exc):
                     is_available, conflicts = BookingService.check_availability(
                         listing_id=str(listing.id),
@@ -304,15 +343,7 @@ class BookingService:
                     )
                     if not is_available:
                         return None, BookingService.build_overlap_error(conflicts)
-                    return None, {
-                        "detail": (
-                            "Selected dates are no longer available. "
-                            "Please choose different dates."
-                        ),
-                        "code": BookingService.BOOKING_DATES_OVERLAP_CODE,
-                        "conflicts_count": 0,
-                        "conflicts": [],
-                    }
+                    return None, dict(BookingService.DEFAULT_IDEMPOTENCY_CONFLICT_ERROR)
                 raise
             except OperationalError as exc:
                 if (
@@ -323,15 +354,7 @@ class BookingService:
                     continue
                 raise
 
-        return None, {
-            "detail": (
-                "Booking could not be completed because availability changed. "
-                "Please try again."
-            ),
-            "code": BookingService.BOOKING_DATES_OVERLAP_CODE,
-            "conflicts_count": 0,
-            "conflicts": [],
-        }
+        return None, dict(BookingService.DEFAULT_IDEMPOTENCY_CONFLICT_ERROR)
 
     @staticmethod
     @transaction.atomic
@@ -480,8 +503,88 @@ class PaymentService:
     Test mode uses INR per Razorpay docs.
     """
 
+    MAX_PROVIDER_RETRIES = 3
+    INITIAL_BACKOFF_SECONDS = 0.2
+    TRANSIENT_GATEWAY_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
+
     @staticmethod
-    def create_razorpay_order(booking: Booking) -> dict | None:
+    def is_retryable_gateway_error(exc: Exception) -> bool:
+        """Return True for transient provider/network failures worth retrying."""
+        for candidate in (exc, getattr(exc, "__cause__", None), getattr(exc, "__context__", None)):
+            if candidate is None:
+                continue
+
+            status_code = getattr(candidate, "status_code", None)
+            if status_code in PaymentService.TRANSIENT_GATEWAY_STATUS_CODES:
+                return True
+
+            code = getattr(candidate, "code", None)
+            if code in PaymentService.TRANSIENT_GATEWAY_STATUS_CODES:
+                return True
+
+            message = str(candidate).lower()
+            if any(
+                needle in message
+                for needle in (
+                    "timed out",
+                    "timeout",
+                    "temporar",
+                    "network",
+                    "connection reset",
+                    "connection aborted",
+                    "connection refused",
+                    "service unavailable",
+                    "bad gateway",
+                    "gateway timeout",
+                    "try again",
+                    "rate limit",
+                )
+            ):
+                return True
+
+        return False
+
+    @staticmethod
+    def call_gateway_with_retry(operation, *, action_name: str):
+        """Retry transient provider failures with bounded exponential backoff."""
+        last_error = None
+        for attempt in range(PaymentService.MAX_PROVIDER_RETRIES):
+            try:
+                return operation()
+            except Exception as exc:
+                last_error = exc
+                if (
+                    not PaymentService.is_retryable_gateway_error(exc)
+                    or attempt >= PaymentService.MAX_PROVIDER_RETRIES - 1
+                ):
+                    raise
+
+                time.sleep(
+                    PaymentService.INITIAL_BACKOFF_SECONDS * (2 ** attempt)
+                )
+
+        raise last_error  # pragma: no cover
+
+    @staticmethod
+    def build_payment_response(
+        booking: Booking,
+        payment: Payment,
+        key_id: str,
+    ) -> dict[str, object]:
+        """Serialize payment-order info for frontend checkout."""
+        return {
+            "order_id": payment.gateway_order_id,
+            "razorpay_key_id": key_id,
+            "amount": float(booking.total_price),
+            "currency": payment.currency,
+            "payment_id": str(payment.id),
+        }
+
+    @staticmethod
+    def create_razorpay_order(
+        booking: Booking,
+        idempotency_key: str | None = None,
+    ) -> dict | None:
         """
         Create a Razorpay order for the booking.
         Returns order details for frontend Checkout, or None if Razorpay is not configured.
@@ -498,19 +601,69 @@ class PaymentService:
         except ImportError:
             return None
 
-        payment = booking.payments.filter(status=Payment.Status.PENDING).first()
+        payment = None
+        if idempotency_key:
+            payment = booking.payments.filter(
+                request_idempotency_key=idempotency_key
+            ).first()
+            if payment and payment.gateway_order_id:
+                return PaymentService.build_payment_response(booking, payment, key_id)
+
         if not payment:
-            payment = Payment.objects.create(
-                booking=booking,
-                amount=booking.total_price,
-                currency="INR",
+            payment = booking.payments.filter(
                 status=Payment.Status.PENDING,
-                payment_method=Payment.PaymentMethod.CARD,
-            )
+                gateway_order_id="",
+            ).first()
+
+        if not payment:
+            try:
+                payment = Payment.objects.create(
+                    booking=booking,
+                    amount=booking.total_price,
+                    currency="INR",
+                    status=Payment.Status.PENDING,
+                    payment_method=Payment.PaymentMethod.CARD,
+                    request_idempotency_key=idempotency_key,
+                )
+            except IntegrityError:
+                if idempotency_key:
+                    payment = booking.payments.filter(
+                        request_idempotency_key=idempotency_key
+                    ).first()
+                if not payment:
+                    raise
         else:
             payment.currency = "INR"
             payment.payment_method = Payment.PaymentMethod.CARD
-            payment.save(update_fields=["currency", "payment_method", "updated_at"])
+            if idempotency_key and payment.request_idempotency_key != idempotency_key:
+                if payment.gateway_order_id:
+                    try:
+                        payment = Payment.objects.create(
+                            booking=booking,
+                            amount=booking.total_price,
+                            currency="INR",
+                            status=Payment.Status.PENDING,
+                            payment_method=Payment.PaymentMethod.CARD,
+                            request_idempotency_key=idempotency_key,
+                        )
+                    except IntegrityError:
+                        payment = booking.payments.filter(
+                            request_idempotency_key=idempotency_key
+                        ).first()
+                        if payment is None:
+                            raise
+                else:
+                    payment.request_idempotency_key = idempotency_key
+                    payment.save(
+                        update_fields=[
+                            "currency",
+                            "payment_method",
+                            "request_idempotency_key",
+                            "updated_at",
+                        ]
+                    )
+            else:
+                payment.save(update_fields=["currency", "payment_method", "updated_at"])
 
         # INR: amount in paise (1 INR = 100 paise). Min 100 paise = ₹1.00
         amount_paise = int(Decimal(str(booking.total_price)) * 100)
@@ -524,31 +677,35 @@ class PaymentService:
             "notes": {
                 "booking_id": str(booking.id),
                 "payment_id": str(payment.id),
+                "idempotency_key": idempotency_key or "",
             },
         }
         try:
-            order = client.order.create(data=order_data)
+            order = PaymentService.call_gateway_with_retry(
+                lambda: client.order.create(data=order_data),
+                action_name="create_razorpay_order",
+            )
         except Exception:
             return None
         payment.gateway_order_id = order["id"]
         payment.save(update_fields=["gateway_order_id", "updated_at"])
 
-        return {
-            "order_id": order["id"],
-            "razorpay_key_id": key_id,
-            "amount": float(booking.total_price),
-            "currency": "INR",
-            "payment_id": str(payment.id),
-        }
+        return PaymentService.build_payment_response(booking, payment, key_id)
 
     @staticmethod
-    def create_payment_intent(booking: Booking) -> dict | None:
+    def create_payment_intent(
+        booking: Booking,
+        idempotency_key: str | None = None,
+    ) -> dict | None:
         """
         Create a Razorpay order for the booking.
         Returns payment info for frontend including order_id and razorpay_key_id.
         Returns None if Razorpay is not configured or order creation fails.
         """
-        return PaymentService.create_razorpay_order(booking)
+        return PaymentService.create_razorpay_order(
+            booking,
+            idempotency_key=idempotency_key,
+        )
 
     @staticmethod
     def verify_razorpay_payment(
@@ -582,6 +739,15 @@ class PaymentService:
         try:
             booking = Booking.objects.get(id=booking_id, status=Booking.Status.PENDING_PAYMENT)
         except Booking.DoesNotExist:
+            existing_booking = Booking.objects.filter(id=booking_id).first()
+            if existing_booking and existing_booking.status == Booking.Status.CONFIRMED:
+                matching_payment = existing_booking.payments.filter(
+                    gateway_order_id=razorpay_order_id,
+                    gateway_payment_id=razorpay_payment_id,
+                    status=Payment.Status.COMPLETED,
+                ).first()
+                if matching_payment:
+                    return True, "Payment already verified. Booking confirmed."
             return False, "Booking not found or already processed."
 
         payment = booking.payments.filter(
@@ -595,6 +761,14 @@ class PaymentService:
         payment.gateway_payment_id = razorpay_payment_id
         payment.gateway_signature = razorpay_signature
         payment.save(update_fields=["status", "gateway_payment_id", "gateway_signature", "updated_at"])
+
+        booking.payments.filter(
+            status=Payment.Status.PENDING,
+        ).exclude(id=payment.id).update(
+            status=Payment.Status.FAILED,
+            failure_reason="Superseded by a later successful payment attempt.",
+            updated_at=timezone.now(),
+        )
 
         booking.status = Booking.Status.CONFIRMED
         booking.save(update_fields=["status", "updated_at"])
@@ -658,9 +832,12 @@ class PaymentService:
         }
 
         try:
-            refund = client.payment.refund(
-                payment.gateway_payment_id,
-                refund_data,
+            refund = PaymentService.call_gateway_with_retry(
+                lambda: client.payment.refund(
+                    payment.gateway_payment_id,
+                    refund_data,
+                ),
+                action_name="create_razorpay_refund",
             )
         except Exception as e:
             err_msg = str(e).lower()

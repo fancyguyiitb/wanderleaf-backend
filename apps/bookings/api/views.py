@@ -118,6 +118,11 @@ class BookingViewSet(viewsets.ModelViewSet):
 
     def create(self, request, *args, **kwargs):
         """Create a new booking."""
+        idempotency_key = request.headers.get("Idempotency-Key") or None
+        existing_booking = BookingService.get_existing_booking_for_idempotency_key(
+            guest=request.user,
+            idempotency_key=idempotency_key,
+        )
         serializer = BookingCreateSerializer(
             data=request.data,
             context={"request": request},
@@ -126,6 +131,25 @@ class BookingViewSet(viewsets.ModelViewSet):
 
         listing = serializer.context["listing"]
         data = serializer.validated_data
+        if existing_booking is not None:
+            same_request = (
+                str(existing_booking.listing_id) == str(listing.id)
+                and existing_booking.check_in == data["check_in"]
+                and existing_booking.check_out == data["check_out"]
+                and existing_booking.num_guests == data["num_guests"]
+                and (existing_booking.special_requests or "") == data.get("special_requests", "")
+            )
+            if not same_request:
+                return Response(
+                    {
+                        "detail": (
+                            "This idempotency key was already used for a different "
+                            "booking request."
+                        ),
+                        "code": "idempotency_key_reused",
+                    },
+                    status=status.HTTP_409_CONFLICT,
+                )
 
         booking, error = BookingService.create_booking(
             listing=listing,
@@ -134,6 +158,7 @@ class BookingViewSet(viewsets.ModelViewSet):
             check_out=data["check_out"],
             num_guests=data["num_guests"],
             special_requests=data.get("special_requests", ""),
+            create_idempotency_key=idempotency_key,
         )
 
         if error:
@@ -148,9 +173,13 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=response_status,
             )
 
-        payment_info = PaymentService.create_payment_intent(booking)
+        payment_info = PaymentService.create_payment_intent(
+            booking,
+            idempotency_key=idempotency_key,
+        )
         if payment_info is None:
-            booking.delete()
+            if existing_booking is None:
+                booking.delete()
             return Response(
                 {
                     "detail": "Payment gateway is not available. Please ensure Razorpay is configured (RZP_TEST_KEY_ID, RZP_TEST_KEY_SECRET).",
@@ -168,7 +197,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 "booking": response_serializer.data,
                 "payment": payment_info,
             },
-            status=status.HTTP_201_CREATED,
+            status=(
+                status.HTTP_200_OK
+                if existing_booking is not None and str(existing_booking.id) == str(booking.id)
+                else status.HTTP_201_CREATED
+            ),
         )
 
     def retrieve(self, request, *args, **kwargs):
@@ -416,7 +449,11 @@ class BookingViewSet(viewsets.ModelViewSet):
                 status=status.HTTP_410_GONE,
             )
 
-        payment_info = PaymentService.create_payment_intent(booking)
+        idempotency_key = request.headers.get("Idempotency-Key") or None
+        payment_info = PaymentService.create_payment_intent(
+            booking,
+            idempotency_key=idempotency_key,
+        )
         if payment_info is None:
             return Response(
                 {

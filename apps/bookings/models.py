@@ -116,6 +116,13 @@ class Booking(TimeStampedModel):
         default=False,
         help_text="When True, payment retry is not allowed (e.g. verification failed; money may have been charged).",
     )
+    create_idempotency_key = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Client-supplied idempotency key for booking creation retries.",
+    )
 
     class Meta:
         ordering = ["-created_at"]
