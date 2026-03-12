@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from corsheaders.defaults import default_headers
 from dotenv import load_dotenv
 
 
@@ -91,7 +92,9 @@ if DATABASE_URL:
         "default": dj_database_url.parse(DATABASE_URL, conn_max_age=600, ssl_require=True),
     }
 else:
-    # Local development fallback (SQLite)
+    # Local development fallback (SQLite). This is weaker than Postgres for
+    # bookings because select_for_update row locks and exclusion constraints
+    # are not available here.
     DATABASES = {
         "default": {
             "ENGINE": "django.db.backends.sqlite3",
@@ -195,6 +198,10 @@ AUTH_USER_MODEL = "users.User"
 
 
 CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
+
+CORS_ALLOW_HEADERS = list(default_headers) + [
+    "idempotency-key",
+]
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": (

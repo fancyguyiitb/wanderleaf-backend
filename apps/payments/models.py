@@ -80,6 +80,13 @@ class Payment(TimeStampedModel):
         default="",
         help_text="Signature from payment gateway for verification.",
     )
+    request_idempotency_key = models.CharField(
+        max_length=255,
+        null=True,
+        blank=True,
+        unique=True,
+        help_text="Client-supplied idempotency key for payment-order creation retries.",
+    )
 
     failure_reason = models.TextField(
         blank=True,
