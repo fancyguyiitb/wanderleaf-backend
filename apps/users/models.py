@@ -42,7 +42,22 @@ class User(TimeStampedModel, AbstractUser):
         blank=True,
         help_text="Profile photo for the user.",
     )
+    chat_public_key = models.TextField(blank=True, default="")
+    chat_key_algorithm = models.CharField(max_length=64, blank=True, default="")
+    chat_key_version = models.PositiveIntegerField(default=0)
+    chat_key_uploaded_at = models.DateTimeField(null=True, blank=True)
+    chat_private_key_backup = models.TextField(blank=True, default="")
+    chat_private_key_backup_iv = models.CharField(max_length=255, blank=True, default="")
+    chat_private_key_backup_salt = models.CharField(max_length=255, blank=True, default="")
+    chat_private_key_backup_kdf = models.CharField(max_length=64, blank=True, default="")
+    chat_private_key_backup_kdf_iterations = models.PositiveIntegerField(default=0)
+    chat_private_key_backup_cipher = models.CharField(max_length=64, blank=True, default="")
+    chat_private_key_backup_version = models.PositiveIntegerField(default=0)
 
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = ["username"]
+
+    @property
+    def has_chat_key(self) -> bool:
+        return bool(self.chat_public_key and self.chat_private_key_backup)
 

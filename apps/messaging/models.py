@@ -43,6 +43,7 @@ class Message(TimeStampedModel):
     conversation = models.ForeignKey(Conversation, on_delete=models.CASCADE, related_name="messages")
     sender = models.ForeignKey(User, on_delete=models.CASCADE, related_name="messages_sent")
     body = models.TextField(blank=True, default="")
+    encrypted_body = models.JSONField(null=True, blank=True)
     message_type = models.CharField(
         max_length=20,
         choices=MessageType.choices,
@@ -63,6 +64,10 @@ class Message(TimeStampedModel):
 
     def __str__(self):
         return f"Message {self.id} in conversation {self.conversation_id}"
+
+    @property
+    def is_encrypted(self) -> bool:
+        return bool(self.encrypted_body and self.encrypted_body.get("ciphertext"))
 
 
 class ConversationReadState(TimeStampedModel):

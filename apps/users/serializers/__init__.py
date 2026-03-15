@@ -10,11 +10,23 @@ class UserSerializer(serializers.ModelSerializer):
     """Public representation of a user."""
 
     avatar = serializers.SerializerMethodField()
+    has_chat_key = serializers.SerializerMethodField()
 
     class Meta:
         model = User
-        fields = ["id", "username", "email", "phone_number", "avatar", "date_joined"]
-        read_only_fields = ["id", "date_joined", "avatar"]
+        fields = [
+            "id",
+            "username",
+            "email",
+            "phone_number",
+            "avatar",
+            "date_joined",
+            "has_chat_key",
+            "chat_key_algorithm",
+            "chat_key_version",
+            "chat_key_uploaded_at",
+        ]
+        read_only_fields = fields
 
     def get_avatar(self, obj) -> str | None:
         """
@@ -42,6 +54,86 @@ class UserSerializer(serializers.ModelSerializer):
         except Exception:
             # If there's any error getting the URL, return None
             return None
+
+    def get_has_chat_key(self, obj) -> bool:
+        return obj.has_chat_key
+
+
+class ChatKeyBackupSerializer(serializers.ModelSerializer):
+    public_key = serializers.CharField(source="chat_public_key")
+    key_algorithm = serializers.CharField(source="chat_key_algorithm")
+    key_version = serializers.IntegerField(source="chat_key_version", min_value=1)
+    encrypted_private_key = serializers.CharField(source="chat_private_key_backup")
+    backup_iv = serializers.CharField(source="chat_private_key_backup_iv")
+    backup_salt = serializers.CharField(source="chat_private_key_backup_salt")
+    backup_kdf = serializers.CharField(source="chat_private_key_backup_kdf")
+    backup_kdf_iterations = serializers.IntegerField(source="chat_private_key_backup_kdf_iterations", min_value=1)
+    backup_cipher = serializers.CharField(source="chat_private_key_backup_cipher")
+    backup_version = serializers.IntegerField(source="chat_private_key_backup_version", min_value=1)
+    has_backup = serializers.SerializerMethodField()
+
+    class Meta:
+        model = User
+        fields = [
+            "has_backup",
+            "public_key",
+            "key_algorithm",
+            "key_version",
+            "encrypted_private_key",
+            "backup_iv",
+            "backup_salt",
+            "backup_kdf",
+            "backup_kdf_iterations",
+            "backup_cipher",
+            "backup_version",
+            "chat_key_uploaded_at",
+        ]
+        read_only_fields = ["has_backup", "chat_key_uploaded_at"]
+
+    def get_has_backup(self, obj) -> bool:
+        return obj.has_chat_key
+
+    def validate_public_key(self, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise serializers.ValidationError("Public key is required.")
+        return value
+
+    def validate_key_algorithm(self, value: str) -> str:
+        value = value.strip()
+        if value != "RSA-OAEP-256":
+            raise serializers.ValidationError("Unsupported chat key algorithm.")
+        return value
+
+    def validate_backup_kdf(self, value: str) -> str:
+        value = value.strip()
+        if value != "PBKDF2-SHA256":
+            raise serializers.ValidationError("Unsupported chat key derivation function.")
+        return value
+
+    def validate_backup_cipher(self, value: str) -> str:
+        value = value.strip()
+        if value != "AES-GCM":
+            raise serializers.ValidationError("Unsupported chat key backup cipher.")
+        return value
+
+    def validate(self, attrs):
+        required_fields = [
+            "chat_public_key",
+            "chat_key_algorithm",
+            "chat_key_version",
+            "chat_private_key_backup",
+            "chat_private_key_backup_iv",
+            "chat_private_key_backup_salt",
+            "chat_private_key_backup_kdf",
+            "chat_private_key_backup_kdf_iterations",
+            "chat_private_key_backup_cipher",
+            "chat_private_key_backup_version",
+        ]
+        missing = [field for field in required_fields if not attrs.get(field)]
+        if missing:
+            raise serializers.ValidationError("Complete chat key backup metadata is required.")
+        return attrs
 
 
 class RegisterSerializer(serializers.ModelSerializer):
