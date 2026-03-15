@@ -14,7 +14,11 @@ from apps.messaging.selectors import (
     get_inbox_conversations_with_unread,
     get_unread_count_for_user,
 )
-from apps.messaging.serializers import ChatUserSummarySerializer, ConversationSerializer
+from apps.messaging.serializers import (
+    ChatUserSummarySerializer,
+    ConversationSerializer,
+    MessageSerializer,
+)
 from apps.messaging.services import (
     can_access_booking_chat,
     get_or_create_conversation_for_booking,
@@ -203,6 +207,11 @@ class InboxListView(APIView):
                     "is_chat_available": is_booking_chat_active(booking),
                     "other_participant": user_serializer.data,
                     "last_message": preview,
+                    "last_message_payload": (
+                        MessageSerializer(last_msg, context={"request": request}).data
+                        if last_msg
+                        else None
+                    ),
                     "last_message_at": last_at,
                     "unread_count": item["unread_count"],
                 }
