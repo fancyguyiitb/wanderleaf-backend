@@ -85,14 +85,21 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
             raise ValueError("Chat is unavailable for this booking.")
 
         body = (payload.get("body") or "").strip()
+        encrypted_body = self._normalize_encrypted_body(payload.get("encrypted_body"))
         attachment_url = (payload.get("attachment_url") or "").strip()
         attachment_name = (payload.get("attachment_name") or "").strip()
         attachment_mime = (payload.get("attachment_mime") or "").strip()
         attachment_bytes = payload.get("attachment_bytes")
         requested_type = (payload.get("message_type") or "").strip()
 
-        if not body and not attachment_url:
+        if encrypted_body and body:
+            raise ValueError("Encrypted messages must not include plaintext body content.")
+
+        if not body and not encrypted_body and not attachment_url:
             raise ValueError("Message cannot be empty.")
+
+        if body and not encrypted_body:
+            raise ValueError("Text messages must be end-to-end encrypted.")
 
         if attachment_url:
             inferred_type = (
@@ -110,7 +117,8 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
         message = Message.objects.create(
             conversation=conversation,
             sender=self.scope["user"],
-            body=body,
+            body=body if not encrypted_body else "",
+            encrypted_body=encrypted_body,
             message_type=message_type,
             attachment_url=attachment_url,
             attachment_name=attachment_name,
@@ -136,6 +144,51 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
             "message": serialized_message,
             "recipient_ids": recipient_ids,
             "notification": notification,
+        }
+
+    def _normalize_encrypted_body(self, value):
+        if value in (None, ""):
+            return None
+        if not isinstance(value, dict):
+            raise ValueError("Encrypted message payload is invalid.")
+
+        required_fields = [
+            "ciphertext",
+            "iv",
+            "wrapped_keys",
+            "algorithm",
+            "key_algorithm",
+            "version",
+            "sender_key_version",
+        ]
+        if any(field not in value for field in required_fields):
+            raise ValueError("Encrypted message payload is incomplete.")
+
+        if value.get("algorithm") != "AES-GCM":
+            raise ValueError("Encrypted message payload uses an unsupported cipher.")
+        if value.get("key_algorithm") != "RSA-OAEP-256":
+            raise ValueError("Encrypted message payload uses an unsupported key algorithm.")
+
+        wrapped_keys = value.get("wrapped_keys")
+        if not isinstance(wrapped_keys, dict) or not wrapped_keys:
+            raise ValueError("Encrypted message payload is missing wrapped keys.")
+
+        for recipient_id, wrapped_key_data in wrapped_keys.items():
+            if not recipient_id or not isinstance(wrapped_key_data, dict):
+                raise ValueError("Encrypted message payload contains invalid wrapped keys.")
+            if not wrapped_key_data.get("wrapped_key"):
+                raise ValueError("Encrypted message payload contains an empty wrapped key.")
+            if not wrapped_key_data.get("key_version"):
+                raise ValueError("Encrypted message payload contains an invalid key version.")
+
+        return {
+            "ciphertext": value["ciphertext"],
+            "iv": value["iv"],
+            "wrapped_keys": wrapped_keys,
+            "algorithm": value["algorithm"],
+            "key_algorithm": value["key_algorithm"],
+            "version": value["version"],
+            "sender_key_version": value["sender_key_version"],
         }
 
 

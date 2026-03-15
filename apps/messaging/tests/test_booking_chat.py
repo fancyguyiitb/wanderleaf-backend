@@ -18,6 +18,21 @@ from config.asgi import application
 
 
 class BookingChatBaseMixin:
+    @staticmethod
+    def encrypted_body_for(*, guest_id: str, host_id: str):
+        return {
+            "ciphertext": "c2VjdXJlLWNpcGhlcnRleHQ=",
+            "iv": "MTIzNDU2Nzg5MDEy",
+            "wrapped_keys": {
+                guest_id: {"wrapped_key": "Z3Vlc3Qtd3JhcHBlZC1rZXk=", "key_version": 1},
+                host_id: {"wrapped_key": "aG9zdC13cmFwcGVkLWtleQ==", "key_version": 1},
+            },
+            "algorithm": "AES-GCM",
+            "key_algorithm": "RSA-OAEP-256",
+            "version": 1,
+            "sender_key_version": 1,
+        }
+
     def create_booking(self, *, guest, status=Booking.Status.PENDING_PAYMENT):
         return Booking.objects.create(
             listing=self.listing,
@@ -61,6 +76,31 @@ class BookingChatBaseMixin:
             username="Stranger User",
             password="testpass123",
         )
+        for index, user in enumerate((self.host, self.guest, self.stranger), start=1):
+            user.chat_public_key = f"public-key-{index}"
+            user.chat_key_algorithm = "RSA-OAEP-256"
+            user.chat_key_version = 1
+            user.chat_private_key_backup = f"encrypted-private-key-{index}"
+            user.chat_private_key_backup_iv = f"backup-iv-{index}"
+            user.chat_private_key_backup_salt = f"backup-salt-{index}"
+            user.chat_private_key_backup_kdf = "PBKDF2-SHA256"
+            user.chat_private_key_backup_kdf_iterations = 600000
+            user.chat_private_key_backup_cipher = "AES-GCM"
+            user.chat_private_key_backup_version = 1
+            user.save(
+                update_fields=[
+                    "chat_public_key",
+                    "chat_key_algorithm",
+                    "chat_key_version",
+                    "chat_private_key_backup",
+                    "chat_private_key_backup_iv",
+                    "chat_private_key_backup_salt",
+                    "chat_private_key_backup_kdf",
+                    "chat_private_key_backup_kdf_iterations",
+                    "chat_private_key_backup_cipher",
+                    "chat_private_key_backup_version",
+                ]
+            )
 
 
 class BookingChatApiTests(BookingChatBaseMixin, APITestCase):
@@ -87,6 +127,10 @@ class BookingChatApiTests(BookingChatBaseMixin, APITestCase):
             {participant["id"] for participant in response.data["participants"]},
             {str(self.host.id), str(self.guest.id)},
         )
+        self.assertTrue(
+            all(participant["chat_encryption"] for participant in response.data["participants"])
+        )
+        self.assertNotIn("encrypted_private_key", response.data["participants"][0])
 
     def test_host_can_bootstrap_chat_for_confirmed_booking(self):
         self.client.force_authenticate(user=self.host)
@@ -148,6 +192,84 @@ class BookingChatWebSocketTests(BookingChatBaseMixin, TransactionTestCase):
     def test_guest_can_send_message_over_websocket_for_pending_booking(self):
         booking = self.create_booking(guest=self.guest)
         conversation = get_or_create_conversation_for_booking(booking)
+        encrypted_body = self.encrypted_body_for(
+            guest_id=str(self.guest.id),
+            host_id=str(self.host.id),
+        )
+
+        async def run_test():
+            communicator = WebsocketCommunicator(
+                application,
+                f"/ws/messaging/conversations/{conversation.id}/?token={self._token_for(self.guest)}",
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            await communicator.send_json_to(
+                {
+                    "action": "message.send",
+                    "payload": {
+                        "body": "",
+                        "encrypted_body": encrypted_body,
+                    },
+                }
+            )
+            response = await communicator.receive_json_from(timeout=5)
+
+            self.assertEqual(response["type"], "message.created")
+            self.assertEqual(response["message"]["body"], "")
+            self.assertTrue(response["message"]["is_encrypted"])
+            self.assertEqual(
+                response["message"]["encrypted_body"]["ciphertext"],
+                encrypted_body["ciphertext"],
+            )
+            self.assertEqual(response["message"]["sender"]["id"], str(self.guest.id))
+            await communicator.disconnect()
+
+        async_to_sync(run_test)()
+        self.assertEqual(Message.objects.count(), 1)
+
+    def test_host_can_send_message_over_websocket_for_confirmed_booking(self):
+        booking = self.create_booking(
+            guest=self.guest,
+            status=Booking.Status.CONFIRMED,
+        )
+        conversation = get_or_create_conversation_for_booking(booking)
+        encrypted_body = self.encrypted_body_for(
+            guest_id=str(self.guest.id),
+            host_id=str(self.host.id),
+        )
+
+        async def run_test():
+            communicator = WebsocketCommunicator(
+                application,
+                f"/ws/messaging/conversations/{conversation.id}/?token={self._token_for(self.host)}",
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            await communicator.send_json_to(
+                {
+                    "action": "message.send",
+                    "payload": {
+                        "body": "",
+                        "encrypted_body": encrypted_body,
+                    },
+                }
+            )
+            response = await communicator.receive_json_from(timeout=5)
+
+            self.assertEqual(response["type"], "message.created")
+            self.assertEqual(response["message"]["body"], "")
+            self.assertTrue(response["message"]["is_encrypted"])
+            self.assertEqual(response["message"]["sender"]["id"], str(self.host.id))
+            await communicator.disconnect()
+
+        async_to_sync(run_test)()
+
+    def test_plaintext_text_message_is_rejected_over_websocket(self):
+        booking = self.create_booking(guest=self.guest)
+        conversation = get_or_create_conversation_for_booking(booking)
 
         async def run_test():
             communicator = WebsocketCommunicator(
@@ -162,37 +284,8 @@ class BookingChatWebSocketTests(BookingChatBaseMixin, TransactionTestCase):
             )
             response = await communicator.receive_json_from(timeout=5)
 
-            self.assertEqual(response["type"], "message.created")
-            self.assertEqual(response["message"]["body"], "Hello host")
-            self.assertEqual(response["message"]["sender"]["id"], str(self.guest.id))
-            await communicator.disconnect()
-
-        async_to_sync(run_test)()
-        self.assertEqual(Message.objects.count(), 1)
-
-    def test_host_can_send_message_over_websocket_for_confirmed_booking(self):
-        booking = self.create_booking(
-            guest=self.guest,
-            status=Booking.Status.CONFIRMED,
-        )
-        conversation = get_or_create_conversation_for_booking(booking)
-
-        async def run_test():
-            communicator = WebsocketCommunicator(
-                application,
-                f"/ws/messaging/conversations/{conversation.id}/?token={self._token_for(self.host)}",
-            )
-            connected, _ = await communicator.connect()
-            self.assertTrue(connected)
-
-            await communicator.send_json_to(
-                {"action": "message.send", "payload": {"body": "Welcome to your stay"}}
-            )
-            response = await communicator.receive_json_from(timeout=5)
-
-            self.assertEqual(response["type"], "message.created")
-            self.assertEqual(response["message"]["body"], "Welcome to your stay")
-            self.assertEqual(response["message"]["sender"]["id"], str(self.host.id))
+            self.assertEqual(response["type"], "error")
+            self.assertEqual(response["detail"], "Text messages must be end-to-end encrypted.")
             await communicator.disconnect()
 
         async_to_sync(run_test)()

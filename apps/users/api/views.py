@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.utils import timezone
 
 from rest_framework import generics, permissions, serializers, status
 from rest_framework.exceptions import AuthenticationFailed
@@ -6,7 +7,12 @@ from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 from rest_framework_simplejwt.tokens import RefreshToken
 
-from apps.users.serializers import RegisterSerializer, UserSerializer, UserUpdateSerializer
+from apps.users.serializers import (
+    ChatKeyBackupSerializer,
+    RegisterSerializer,
+    UserSerializer,
+    UserUpdateSerializer,
+)
 
 
 User = get_user_model()
@@ -130,6 +136,21 @@ class AvatarUploadView(generics.GenericAPIView):
             user.avatar.delete(save=True)
 
         serializer = self.get_serializer(user, context={"request": request})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+
+class ChatKeyBackupView(generics.GenericAPIView):
+    permission_classes = [permissions.IsAuthenticated]
+    serializer_class = ChatKeyBackupSerializer
+
+    def get(self, request, *args, **kwargs):
+        serializer = self.get_serializer(request.user)
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+    def post(self, request, *args, **kwargs):
+        serializer = self.get_serializer(request.user, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save(chat_key_uploaded_at=timezone.now())
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 

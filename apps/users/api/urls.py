@@ -3,6 +3,7 @@ from rest_framework_simplejwt.views import TokenRefreshView, TokenObtainPairView
 
 from .views import (
     AvatarUploadView,
+    ChatKeyBackupView,
     EmailOrUsernameTokenObtainPairSerializer,
     MeView,
     RegisterView,
@@ -26,6 +27,7 @@ urlpatterns = [
     # Current user profile
     path("me/", MeView.as_view(), name="auth-me"),
     path("me/avatar/", AvatarUploadView.as_view(), name="auth-me-avatar"),
+    path("me/chat-key/", ChatKeyBackupView.as_view(), name="auth-me-chat-key"),
 ]
 
 

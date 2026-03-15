@@ -184,7 +184,9 @@ class InboxListView(APIView):
             last_at = None
             if last_msg:
                 last_at = last_msg.created_at
-                if last_msg.body:
+                if last_msg.is_encrypted:
+                    preview = "Encrypted message"
+                elif last_msg.body:
                     preview = (last_msg.body or "")[:200]
                 elif last_msg.message_type == "image":
                     preview = "Image"

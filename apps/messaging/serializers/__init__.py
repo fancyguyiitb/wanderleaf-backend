@@ -9,6 +9,7 @@ class ChatUserSummarySerializer(serializers.Serializer):
     name = serializers.CharField(source="username", read_only=True)
     email = serializers.EmailField(read_only=True)
     avatar = serializers.SerializerMethodField()
+    chat_encryption = serializers.SerializerMethodField()
 
     def get_avatar(self, obj) -> str | None:
         if not getattr(obj, "avatar", None):
@@ -24,9 +25,19 @@ class ChatUserSummarySerializer(serializers.Serializer):
         except Exception:
             return None
 
+    def get_chat_encryption(self, obj) -> dict | None:
+        if not getattr(obj, "chat_public_key", ""):
+            return None
+        return {
+            "public_key": obj.chat_public_key,
+            "algorithm": obj.chat_key_algorithm,
+            "version": obj.chat_key_version,
+        }
+
 
 class MessageSerializer(serializers.ModelSerializer):
     sender = ChatUserSummarySerializer(read_only=True)
+    is_encrypted = serializers.SerializerMethodField()
 
     class Meta:
         model = Message
@@ -34,6 +45,8 @@ class MessageSerializer(serializers.ModelSerializer):
             "id",
             "sender",
             "body",
+            "encrypted_body",
+            "is_encrypted",
             "message_type",
             "attachment_url",
             "attachment_name",
@@ -43,6 +56,9 @@ class MessageSerializer(serializers.ModelSerializer):
             "updated_at",
         ]
         read_only_fields = fields
+
+    def get_is_encrypted(self, obj) -> bool:
+        return obj.is_encrypted
 
 
 class ConversationSerializer(serializers.ModelSerializer):
