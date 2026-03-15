@@ -290,6 +290,48 @@ class BookingChatWebSocketTests(BookingChatBaseMixin, TransactionTestCase):
 
         async_to_sync(run_test)()
 
+    def test_encrypted_attachment_url_is_not_stored_in_plaintext_fields(self):
+        booking = self.create_booking(guest=self.guest)
+        conversation = get_or_create_conversation_for_booking(booking)
+        encrypted_body = self.encrypted_body_for(
+            guest_id=str(self.guest.id),
+            host_id=str(self.host.id),
+        )
+
+        async def run_test():
+            communicator = WebsocketCommunicator(
+                application,
+                f"/ws/messaging/conversations/{conversation.id}/?token={self._token_for(self.guest)}",
+            )
+            connected, _ = await communicator.connect()
+            self.assertTrue(connected)
+
+            await communicator.send_json_to(
+                {
+                    "action": "message.send",
+                    "payload": {
+                        "body": "",
+                        "encrypted_body": encrypted_body,
+                        "message_type": "file",
+                    },
+                }
+            )
+            response = await communicator.receive_json_from(timeout=5)
+
+            self.assertEqual(response["type"], "message.created")
+            self.assertEqual(response["message"]["attachment_url"], "")
+            self.assertEqual(response["message"]["attachment_name"], "")
+            self.assertEqual(response["message"]["attachment_mime"], "")
+            await communicator.disconnect()
+
+        async_to_sync(run_test)()
+
+        message = Message.objects.get()
+        self.assertEqual(message.attachment_url, "")
+        self.assertEqual(message.attachment_name, "")
+        self.assertEqual(message.attachment_mime, "")
+        self.assertIsNone(message.attachment_bytes)
+
     def test_inactive_booking_socket_connection_is_denied(self):
         booking = self.create_booking(
             guest=self.guest,

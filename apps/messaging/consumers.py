@@ -94,6 +94,8 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
 
         if encrypted_body and body:
             raise ValueError("Encrypted messages must not include plaintext body content.")
+        if encrypted_body and attachment_url:
+            raise ValueError("Encrypted attachment metadata must not be sent in plaintext.")
 
         if not body and not encrypted_body and not attachment_url:
             raise ValueError("Message cannot be empty.")
@@ -107,6 +109,8 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
                 if attachment_mime.startswith("image/")
                 else Message.MessageType.FILE
             )
+        elif encrypted_body and requested_type in (Message.MessageType.IMAGE, Message.MessageType.FILE):
+            inferred_type = requested_type
         else:
             inferred_type = Message.MessageType.TEXT
 
@@ -120,10 +124,10 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
             body=body if not encrypted_body else "",
             encrypted_body=encrypted_body,
             message_type=message_type,
-            attachment_url=attachment_url,
-            attachment_name=attachment_name,
-            attachment_mime=attachment_mime,
-            attachment_bytes=attachment_bytes or None,
+            attachment_url=attachment_url if not encrypted_body else "",
+            attachment_name=attachment_name if not encrypted_body else "",
+            attachment_mime=attachment_mime if not encrypted_body else "",
+            attachment_bytes=(attachment_bytes or None) if not encrypted_body else None,
         )
         conversation.updated_at = timezone.now()
         conversation.save(update_fields=["updated_at"])
