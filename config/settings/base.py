@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 import dj_database_url
 from corsheaders.defaults import default_headers
@@ -10,11 +11,39 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
 load_dotenv(BASE_DIR / ".env")
 
+
+def _get_app_env() -> str:
+    env = os.getenv("DJANGO_ENV", "development").strip().lower()
+    return "production" if env in {"production", "prod"} else "development"
+
+
+def _split_env_values(name: str) -> list[str]:
+    raw = os.getenv(name, "").replace(",", " ")
+    return [value.strip() for value in raw.split() if value.strip()]
+
+
+def _get_env_url(dev_var: str, prod_var: str, app_env: str) -> str:
+    selected_var = prod_var if app_env == "production" else dev_var
+    value = os.getenv(selected_var, "").strip().rstrip("/")
+    if not value:
+        raise RuntimeError(f"{selected_var} must be set for {app_env} environment.")
+    return value
+
+
+APP_ENV = _get_app_env()
+FRONTEND_BASE_URL = _get_env_url("FRONTEND_URL_DEV", "FRONTEND_URL_PROD", APP_ENV)
+BACKEND_BASE_URL = _get_env_url("BACKEND_URL_DEV", "BACKEND_URL_PROD", APP_ENV)
+
+_backend_hostname = urlparse(BACKEND_BASE_URL).hostname
+_default_allowed_hosts = [_backend_hostname] if _backend_hostname else []
+if APP_ENV == "development":
+    _default_allowed_hosts.extend(["localhost", "127.0.0.1"])
+
 SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "insecure-dev-secret-key")
 
 DEBUG = False
 
-ALLOWED_HOSTS: list[str] = os.getenv("DJANGO_ALLOWED_HOSTS", "").split() or ["localhost", "127.0.0.1"]
+ALLOWED_HOSTS: list[str] = _split_env_values("DJANGO_ALLOWED_HOSTS") or _default_allowed_hosts
 
 INSTALLED_APPS = [
     "daphne",
@@ -197,7 +226,13 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 AUTH_USER_MODEL = "users.User"
 
 
-CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "true").lower() == "true"
+CORS_ALLOW_ALL_ORIGINS = os.getenv("CORS_ALLOW_ALL_ORIGINS", "false").lower() == "true"
+CORS_ALLOWED_ORIGINS = _split_env_values("CORS_ALLOWED_ORIGINS") or [FRONTEND_BASE_URL]
+CORS_ALLOW_CREDENTIALS = True
+CSRF_TRUSTED_ORIGINS = _split_env_values("CSRF_TRUSTED_ORIGINS") or [
+    FRONTEND_BASE_URL,
+    BACKEND_BASE_URL,
+]
 
 CORS_ALLOW_HEADERS = list(default_headers) + [
     "idempotency-key",
