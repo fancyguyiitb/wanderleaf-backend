@@ -17,7 +17,8 @@ def get_django_env() -> str:
     Returns:
         str: 'production' or 'development' (defaults to 'development')
     """
-    return os.getenv("DJANGO_ENV", "development").lower().strip()
+    env = os.getenv("DJANGO_ENV", "development").lower().strip()
+    return "production" if env in {"production", "prod"} else "development"
 
 
 def is_production() -> bool:

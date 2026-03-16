@@ -9,8 +9,11 @@ from dotenv import load_dotenv
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
 
-os.environ.setdefault("DJANGO_SETTINGS_MODULE", "config.settings.dev")
-os.environ.setdefault("DJANGO_ENV", "development")
+DJANGO_ENV = os.getenv("DJANGO_ENV", "development").lower().strip()
+settings_module = "config.settings.prod" if DJANGO_ENV in {"production", "prod"} else "config.settings.dev"
+
+os.environ.setdefault("DJANGO_ENV", DJANGO_ENV)
+os.environ.setdefault("DJANGO_SETTINGS_MODULE", settings_module)
 
 
 if __name__ == "__main__":

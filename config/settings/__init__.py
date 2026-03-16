@@ -5,6 +5,7 @@ Reads DJANGO_ENV from environment variables to determine which settings to use.
 Defaults to 'development' if not set.
 
 Set DJANGO_ENV=production in your .env file to use production settings.
+Set DJANGO_ENV=prod as a shorter production alias if you prefer.
 Set DJANGO_ENV=development (or leave unset) to use development settings.
 """
 import os
@@ -19,7 +20,7 @@ load_dotenv(BASE_DIR / ".env")
 DJANGO_ENV = os.getenv("DJANGO_ENV", "development").lower().strip()
 
 # Select settings module based on environment
-if DJANGO_ENV == "production":
+if DJANGO_ENV in {"production", "prod"}:
     from .prod import *  # noqa
 else:
     from .dev import *  # noqa

@@ -10,7 +10,7 @@ load_dotenv(BASE_DIR / ".env")
 
 # Determine settings module based on DJANGO_ENV flag
 DJANGO_ENV = os.getenv("DJANGO_ENV", "development").lower().strip()
-if DJANGO_ENV == "production":
+if DJANGO_ENV in {"production", "prod"}:
     settings_module = "config.settings.prod"
 else:
     settings_module = "config.settings.dev"
