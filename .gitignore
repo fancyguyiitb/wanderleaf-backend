@@ -104,3 +104,4 @@ yarn-error.log*
 
 #test and seed scripts
 test_and_seed_scripts/
+migrations/
