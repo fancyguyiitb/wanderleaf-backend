@@ -28,7 +28,7 @@ class BookingChatConsumer(AsyncJsonWebsocketConsumer):
             return
 
         await self.channel_layer.group_add(self.room_group_name, self.channel_name)
-        await self.accept()
+        await self.accept(self.scope.get("ws_auth_subprotocol"))
 
     async def disconnect(self, close_code):
         if hasattr(self, "room_group_name"):
@@ -205,7 +205,7 @@ class NotificationConsumer(AsyncJsonWebsocketConsumer):
 
         self.user_group_name = _notification_group_name(user.id)
         await self.channel_layer.group_add(self.user_group_name, self.channel_name)
-        await self.accept()
+        await self.accept(self.scope.get("ws_auth_subprotocol"))
 
     async def disconnect(self, close_code):
         if hasattr(self, "user_group_name"):

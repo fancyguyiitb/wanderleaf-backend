@@ -16,7 +16,6 @@ class HostSummarySerializer(serializers.Serializer):
 
     id = serializers.UUIDField(source="host.id", read_only=True)
     name = serializers.CharField(source="host.username", read_only=True)
-    email = serializers.EmailField(source="host.email", read_only=True)
     avatar = serializers.SerializerMethodField()
 
     def get_avatar(self, obj) -> str | None:
