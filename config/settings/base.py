@@ -22,6 +22,13 @@ def _split_env_values(name: str) -> list[str]:
     return [value.strip() for value in raw.split() if value.strip()]
 
 
+def get_env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"true", "1", "yes", "on"}
+
+
 def _get_env_url(dev_var: str, prod_var: str, app_env: str) -> str:
     selected_var = prod_var if app_env == "production" else dev_var
     value = os.getenv(selected_var, "").strip().rstrip("/")
@@ -44,6 +51,18 @@ SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "insecure-dev-secret-key")
 DEBUG = False
 
 ALLOWED_HOSTS: list[str] = _split_env_values("DJANGO_ALLOWED_HOSTS") or _default_allowed_hosts
+SECURE_CONTENT_TYPE_NOSNIFF = get_env_bool("SECURE_CONTENT_TYPE_NOSNIFF", True)
+SECURE_REFERRER_POLICY = os.getenv(
+    "SECURE_REFERRER_POLICY",
+    "strict-origin-when-cross-origin",
+)
+SECURE_CROSS_ORIGIN_OPENER_POLICY = os.getenv(
+    "SECURE_CROSS_ORIGIN_OPENER_POLICY",
+    "same-origin",
+)
+X_FRAME_OPTIONS = os.getenv("X_FRAME_OPTIONS", "DENY")
+SESSION_COOKIE_HTTPONLY = True
+CSRF_COOKIE_HTTPONLY = get_env_bool("CSRF_COOKIE_HTTPONLY", True)
 
 INSTALLED_APPS = [
     "daphne",
