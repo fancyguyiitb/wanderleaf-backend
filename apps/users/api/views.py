@@ -1,13 +1,15 @@
 import json
 import secrets
+from pathlib import Path
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from urllib.request import Request, urlopen
 
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core import signing
 from django.core.cache import cache
+from django.core.files.base import ContentFile
 from django.db import IntegrityError
 from django.http import HttpResponseRedirect
 from django.utils import timezone
@@ -124,6 +126,37 @@ def _build_username_from_google_profile(profile: dict[str, object]) -> str:
     return "Google User"
 
 
+def _save_google_profile_avatar(user, profile: dict[str, object]) -> None:
+    avatar_url = str(profile.get("picture") or "").strip()
+    if not avatar_url or user.avatar:
+        return
+
+    request = Request(avatar_url, method="GET")
+    try:
+        with urlopen(request, timeout=15) as response:
+            image_bytes = response.read()
+            if not image_bytes:
+                return
+
+            content_type = response.headers.get_content_type()
+            extension_map = {
+                "image/jpeg": ".jpg",
+                "image/jpg": ".jpg",
+                "image/png": ".png",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+            }
+            extension = extension_map.get(content_type)
+            if not extension:
+                extension = Path(urlsplit(avatar_url).path).suffix or ".jpg"
+
+            filename = f"google-avatar-{user.pk}{extension}"
+            user.avatar.save(filename, ContentFile(image_bytes), save=True)
+    except Exception:
+        # Avatar import is best-effort only; auth should still succeed.
+        return
+
+
 def _get_or_create_google_user(profile: dict[str, object]):
     email = str(profile.get("email") or "").strip().lower()
     if not email:
@@ -140,11 +173,13 @@ def _get_or_create_google_user(profile: dict[str, object]):
     username = _build_username_from_google_profile(profile)
 
     try:
-        return create_social_user(
+        user = create_social_user(
             username=username,
             email=email,
             phone_number=None,
         )
+        _save_google_profile_avatar(user, profile)
+        return user
     except IntegrityError as exc:
         user = User.objects.filter(email__iexact=email).first()
         if user:
