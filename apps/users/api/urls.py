@@ -5,6 +5,9 @@ from .views import (
     AvatarUploadView,
     ChatKeyBackupView,
     EmailOrUsernameTokenObtainPairSerializer,
+    GoogleOAuthCallbackView,
+    GoogleOAuthExchangeView,
+    GoogleOAuthStartView,
     MeView,
     RegisterView,
 )
@@ -23,6 +26,9 @@ urlpatterns = [
     path("register/", RegisterView.as_view(), name="auth-register"),
     # JWT login / token pair
     path("login/", EmailOrUsernameTokenObtainPairView.as_view(), name="auth-login"),
+    path("google/start/", GoogleOAuthStartView.as_view(), name="auth-google-start"),
+    path("google/callback/", GoogleOAuthCallbackView.as_view(), name="auth-google-callback"),
+    path("google/exchange/", GoogleOAuthExchangeView.as_view(), name="auth-google-exchange"),
     path("token/refresh/", TokenRefreshView.as_view(), name="auth-token-refresh"),
     # Current user profile
     path("me/", MeView.as_view(), name="auth-me"),

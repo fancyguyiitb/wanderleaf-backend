@@ -1,6 +1,6 @@
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import dj_database_url
 from corsheaders.defaults import default_headers
@@ -276,6 +276,23 @@ SIMPLE_JWT = {
     "USER_ID_FIELD": "id",
     "USER_ID_CLAIM": "user_id",
 }
+
+GOOGLE_OAUTH_CLIENT_ID = os.getenv("GOOGLE_OAUTH_CLIENT_ID", "").strip()
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv("GOOGLE_OAUTH_CLIENT_SECRET", "").strip()
+GOOGLE_OAUTH_SCOPES = _split_env_values("GOOGLE_OAUTH_SCOPES") or ["openid", "email", "profile"]
+GOOGLE_OAUTH_PROMPT = os.getenv("GOOGLE_OAUTH_PROMPT", "select_account").strip() or "select_account"
+GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS = int(os.getenv("GOOGLE_OAUTH_STATE_MAX_AGE_SECONDS", "600"))
+GOOGLE_OAUTH_EXCHANGE_TTL_SECONDS = int(os.getenv("GOOGLE_OAUTH_EXCHANGE_TTL_SECONDS", "120"))
+GOOGLE_OAUTH_REDIRECT_PATH = os.getenv(
+    "GOOGLE_OAUTH_REDIRECT_PATH", "/api/v1/auth/google/callback/"
+).strip() or "/api/v1/auth/google/callback/"
+GOOGLE_OAUTH_FRONTEND_CALLBACK_PATH = os.getenv(
+    "GOOGLE_OAUTH_FRONTEND_CALLBACK_PATH", "/auth/google/callback"
+).strip() or "/auth/google/callback"
+GOOGLE_OAUTH_REDIRECT_URI = urljoin(f"{BACKEND_BASE_URL}/", GOOGLE_OAUTH_REDIRECT_PATH.lstrip("/"))
+GOOGLE_OAUTH_FRONTEND_CALLBACK_URL = urljoin(
+    f"{FRONTEND_BASE_URL}/", GOOGLE_OAUTH_FRONTEND_CALLBACK_PATH.lstrip("/")
+)
 
 CHANNELS_REDIS_URL = os.getenv("CHANNELS_REDIS_URL") or os.getenv("CELERY_BROKER_URL")
 

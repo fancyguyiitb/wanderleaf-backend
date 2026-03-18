@@ -6,6 +6,31 @@ from rest_framework import serializers
 User = get_user_model()
 
 
+def _normalize_phone_number(value: str) -> str:
+    digits_only = "".join(ch for ch in value if ch.isdigit())
+    if len(digits_only) < 8 or len(digits_only) > 15:
+        raise serializers.ValidationError("Phone number must be between 8 and 15 digits.")
+    return digits_only
+
+
+def create_social_user(*, email: str, username: str, phone_number: str | None = None):
+    normalized_phone = None
+    if phone_number:
+        normalized_phone = _normalize_phone_number(phone_number)
+        if User.objects.filter(phone_number=normalized_phone).exists():
+            raise serializers.ValidationError({"phone_number": "Phone number is already in use."})
+
+    user = User.objects.create_user(
+        username=username,
+        email=email.strip().lower(),
+        phone_number=normalized_phone,
+        password=None,
+    )
+    user.set_unusable_password()
+    user.save(update_fields=["password"])
+    return user
+
+
 class UserSerializer(serializers.ModelSerializer):
     """Public representation of a user."""
 
@@ -160,9 +185,7 @@ class RegisterSerializer(serializers.ModelSerializer):
         return value
 
     def validate_phone_number(self, value: str) -> str:
-        digits_only = "".join(ch for ch in value if ch.isdigit())
-        if len(digits_only) < 8 or len(digits_only) > 15:
-            raise serializers.ValidationError("Phone number must be between 8 and 15 digits.")
+        digits_only = _normalize_phone_number(value)
         # Enforce uniqueness at the serializer level so we return 400 instead of 500.
         if User.objects.filter(phone_number=digits_only).exists():
             raise serializers.ValidationError("Phone number is already in use.")
